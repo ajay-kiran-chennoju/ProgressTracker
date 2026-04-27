@@ -8,6 +8,7 @@ import { Onboarding } from "@/components/onboarding";
 import Home from "@/pages/home";
 import DayView from "@/pages/day";
 import CategoryDetail from "@/pages/category";
+import SettingsPage from "@/pages/settings";
 import { useCurrentUser } from "@/hooks/use-current-user";
 
 const queryClient = new QueryClient({
@@ -32,6 +33,7 @@ function AppRoutes() {
         <Route path="/" component={Home} />
         <Route path="/day/:date" component={DayView} />
         <Route path="/category/:id" component={CategoryDetail} />
+        <Route path="/settings" component={SettingsPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

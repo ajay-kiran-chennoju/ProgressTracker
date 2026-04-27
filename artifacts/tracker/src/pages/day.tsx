@@ -250,6 +250,7 @@ function CategoryCard({
   const createItem = useCreateItem();
   const updateCategory = useUpdateCategory();
   const deleteCategory = useDeleteCategory();
+  const deleteItem = useDeleteItem();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -333,8 +334,38 @@ function CategoryCard({
         <CardContent className="p-4 space-y-3">
           <ul className="space-y-3">
             {category.items.map((item) => (
-              <li key={item.id} className="text-sm leading-relaxed text-foreground/80 pl-3 border-l-2 border-primary/20">
-                {item.content}
+              <li
+                key={item.id}
+                className="group/item flex items-start gap-2 text-sm leading-relaxed text-foreground/80 pl-3 border-l-2 border-primary/20"
+              >
+                <span className="flex-1 whitespace-pre-wrap">{item.content}</span>
+                {isEditable && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-destructive opacity-60 hover:opacity-100"
+                    onClick={async () => {
+                      if (!confirm("Delete this entry?")) return;
+                      try {
+                        await deleteItem.mutateAsync({
+                          itemId: item.id,
+                          params: { slot },
+                        });
+                        queryClient.invalidateQueries({
+                          queryKey: getGetDayQueryKey(date),
+                        });
+                      } catch (e) {
+                        toast({
+                          title: "Could not delete entry",
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                    aria-label="Delete entry"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </li>
             ))}
           </ul>

@@ -160,7 +160,7 @@ export default function CategoryDetail() {
                   </p>
                   
                   {isEditable && (
-                    <div className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-0 right-0 opacity-100 sm:opacity-60 sm:group-hover:opacity-100 transition-opacity">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">

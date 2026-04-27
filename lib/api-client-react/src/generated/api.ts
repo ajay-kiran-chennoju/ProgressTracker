@@ -36,6 +36,9 @@ import type {
   Summary,
   UpdateCategoryBody,
   UpdateItemBody,
+  UpdatePinBody,
+  ValidateParticipantPin200,
+  ValidatePinBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -368,6 +371,183 @@ export const useRenameParticipant = <
   TContext
 > => {
   return useMutation(getRenameParticipantMutationOptions(options));
+};
+
+/**
+ * @summary Validate the PIN for a participant slot
+ */
+export const getValidateParticipantPinUrl = (slot: ParticipantSlot) => {
+  return `/api/participants/${slot}/validate-pin`;
+};
+
+export const validateParticipantPin = async (
+  slot: ParticipantSlot,
+  validatePinBody: ValidatePinBody,
+  options?: RequestInit,
+): Promise<ValidateParticipantPin200> => {
+  return customFetch<ValidateParticipantPin200>(
+    getValidateParticipantPinUrl(slot),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(validatePinBody),
+    },
+  );
+};
+
+export const getValidateParticipantPinMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateParticipantPin>>,
+    TError,
+    { slot: ParticipantSlot; data: BodyType<ValidatePinBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof validateParticipantPin>>,
+  TError,
+  { slot: ParticipantSlot; data: BodyType<ValidatePinBody> },
+  TContext
+> => {
+  const mutationKey = ["validateParticipantPin"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof validateParticipantPin>>,
+    { slot: ParticipantSlot; data: BodyType<ValidatePinBody> }
+  > = (props) => {
+    const { slot, data } = props ?? {};
+
+    return validateParticipantPin(slot, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ValidateParticipantPinMutationResult = NonNullable<
+  Awaited<ReturnType<typeof validateParticipantPin>>
+>;
+export type ValidateParticipantPinMutationBody = BodyType<ValidatePinBody>;
+export type ValidateParticipantPinMutationError = ErrorType<void>;
+
+/**
+ * @summary Validate the PIN for a participant slot
+ */
+export const useValidateParticipantPin = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateParticipantPin>>,
+    TError,
+    { slot: ParticipantSlot; data: BodyType<ValidatePinBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof validateParticipantPin>>,
+  TError,
+  { slot: ParticipantSlot; data: BodyType<ValidatePinBody> },
+  TContext
+> => {
+  return useMutation(getValidateParticipantPinMutationOptions(options));
+};
+
+/**
+ * @summary Change the PIN for a participant slot
+ */
+export const getUpdateParticipantPinUrl = (slot: ParticipantSlot) => {
+  return `/api/participants/${slot}/pin`;
+};
+
+export const updateParticipantPin = async (
+  slot: ParticipantSlot,
+  updatePinBody: UpdatePinBody,
+  options?: RequestInit,
+): Promise<Participant> => {
+  return customFetch<Participant>(getUpdateParticipantPinUrl(slot), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updatePinBody),
+  });
+};
+
+export const getUpdateParticipantPinMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateParticipantPin>>,
+    TError,
+    { slot: ParticipantSlot; data: BodyType<UpdatePinBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateParticipantPin>>,
+  TError,
+  { slot: ParticipantSlot; data: BodyType<UpdatePinBody> },
+  TContext
+> => {
+  const mutationKey = ["updateParticipantPin"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateParticipantPin>>,
+    { slot: ParticipantSlot; data: BodyType<UpdatePinBody> }
+  > = (props) => {
+    const { slot, data } = props ?? {};
+
+    return updateParticipantPin(slot, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateParticipantPinMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateParticipantPin>>
+>;
+export type UpdateParticipantPinMutationBody = BodyType<UpdatePinBody>;
+export type UpdateParticipantPinMutationError = ErrorType<void>;
+
+/**
+ * @summary Change the PIN for a participant slot
+ */
+export const useUpdateParticipantPin = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateParticipantPin>>,
+    TError,
+    { slot: ParticipantSlot; data: BodyType<UpdatePinBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateParticipantPin>>,
+  TError,
+  { slot: ParticipantSlot; data: BodyType<UpdatePinBody> },
+  TContext
+> => {
+  return useMutation(getUpdateParticipantPinMutationOptions(options));
 };
 
 /**

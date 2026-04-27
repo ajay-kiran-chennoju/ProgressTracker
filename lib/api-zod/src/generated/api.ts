@@ -28,9 +28,12 @@ export const ListParticipantsResponse = zod.array(ListParticipantsResponseItem);
  */
 export const claimParticipantBodyNameMax = 60;
 
+export const claimParticipantBodyPinRegExp = new RegExp("^[0-9]{4,8}$");
+
 export const ClaimParticipantBody = zod.object({
   slot: zod.enum(["A", "B"]),
   name: zod.string().min(1).max(claimParticipantBodyNameMax),
+  pin: zod.string().regex(claimParticipantBodyPinRegExp),
 });
 
 export const ClaimParticipantResponse = zod.object({
@@ -52,6 +55,46 @@ export const RenameParticipantBody = zod.object({
 });
 
 export const RenameParticipantResponse = zod.object({
+  slot: zod.enum(["A", "B"]),
+  name: zod.string().nullable(),
+});
+
+/**
+ * @summary Validate the PIN for a participant slot
+ */
+export const ValidateParticipantPinParams = zod.object({
+  slot: zod.enum(["A", "B"]),
+});
+
+export const validateParticipantPinBodyPinRegExp = new RegExp("^[0-9]{4,8}$");
+
+export const ValidateParticipantPinBody = zod.object({
+  pin: zod.string().regex(validateParticipantPinBodyPinRegExp),
+});
+
+export const ValidateParticipantPinResponse = zod.object({
+  ok: zod.boolean(),
+  hasPin: zod.boolean(),
+});
+
+/**
+ * @summary Change the PIN for a participant slot
+ */
+export const UpdateParticipantPinParams = zod.object({
+  slot: zod.enum(["A", "B"]),
+});
+
+export const updateParticipantPinBodyCurrentPinRegExp = new RegExp(
+  "^[0-9]{4,8}$",
+);
+export const updateParticipantPinBodyNewPinRegExp = new RegExp("^[0-9]{4,8}$");
+
+export const UpdateParticipantPinBody = zod.object({
+  currentPin: zod.string().regex(updateParticipantPinBodyCurrentPinRegExp),
+  newPin: zod.string().regex(updateParticipantPinBodyNewPinRegExp),
+});
+
+export const UpdateParticipantPinResponse = zod.object({
   slot: zod.enum(["A", "B"]),
   name: zod.string().nullable(),
 });

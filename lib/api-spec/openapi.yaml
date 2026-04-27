@@ -93,6 +93,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/Participant"
 
+  /participants/{slot}/validate-pin:
+    post:
+      operationId: validateParticipantPin
+      tags: [participants]
+      summary: Validate the PIN for a participant slot
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ParticipantSlot"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidatePinBody"
+      responses:
+        "200":
+          description: PIN matches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  hasPin:
+                    type: boolean
+                required: [ok, hasPin]
+        "401":
+          description: PIN incorrect
+
+  /participants/{slot}/pin:
+    patch:
+      operationId: updateParticipantPin
+      tags: [participants]
+      summary: Change the PIN for a participant slot
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ParticipantSlot"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePinBody"
+      responses:
+        "200":
+          description: PIN updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Participant"
+        "401":
+          description: Current PIN incorrect
+
   /days/{date}:
     get:
       operationId: getDay
@@ -348,7 +408,10 @@ components:
           type: string
           minLength: 1
           maxLength: 60
-      required: [slot, name]
+        pin:
+          type: string
+          pattern: "^[0-9]{4,8}$"
+      required: [slot, name, pin]
 
     RenameParticipantBody:
       type: object
@@ -358,6 +421,25 @@ components:
           minLength: 1
           maxLength: 60
       required: [name]
+
+    ValidatePinBody:
+      type: object
+      properties:
+        pin:
+          type: string
+          pattern: "^[0-9]{4,8}$"
+      required: [pin]
+
+    UpdatePinBody:
+      type: object
+      properties:
+        currentPin:
+          type: string
+          pattern: "^[0-9]{4,8}$"
+        newPin:
+          type: string
+          pattern: "^[0-9]{4,8}$"
+      required: [currentPin, newPin]
 
     Item:
       type: object

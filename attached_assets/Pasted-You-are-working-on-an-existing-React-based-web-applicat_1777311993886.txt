@@ -1,0 +1,131 @@
+You are working on an existing React-based web application for a dual-participant daily progress tracker.
+
+Your task is to FIX bugs and ADD enhancements without breaking current functionality.
+
+GENERAL REQUIREMENTS:
+- Do not rewrite the entire app.
+- Make incremental, clean changes.
+- Maintain current architecture and component structure.
+- Ensure proper state updates (avoid requiring manual refresh).
+- Use best practices for React (hooks, state sync, routing).
+
+-------------------------------------
+BUG FIXES
+-------------------------------------
+
+1. HOME PAGE REDIRECTION ISSUE
+Problem:
+- After selecting/entering actor name, the app does NOT automatically navigate to the calendar.
+- Currently requires manual refresh.
+
+Fix:
+- Ensure state update triggers re-render.
+- After setting actor (localStorage + state), programmatically navigate to "/".
+- Use React Router navigation (useNavigate).
+
+-------------------------------------
+
+2. SWITCH IDENTITY REDIRECTION ISSUE
+Problem:
+- Clicking "Switch Identity" does not redirect to actor selection screen unless page is refreshed.
+
+Fix:
+- Clear actor from localStorage.
+- Reset relevant React state.
+- Immediately navigate to actor selection screen.
+- Ensure UI updates without reload.
+
+-------------------------------------
+
+3. REMOVE SAMPLE DATA ON INITIAL LOAD
+Problem:
+- Calendar loads with pre-filled/sample data.
+
+Fix:
+- Remove all default/mock/sample data initialization.
+- App should start with EMPTY state.
+- Only user-created data should exist.
+
+-------------------------------------
+
+FEATURE ENHANCEMENTS
+-------------------------------------
+
+4. DELETE ITEMS INSIDE CATEGORY
+Problem:
+- Categories can be deleted.
+- Individual entries (items) inside category cannot be deleted.
+
+Add:
+- Add delete option for each item.
+- Ensure:
+  - Only editable participant can delete
+  - UI reflects change instantly
+  - Data persists correctly
+
+-------------------------------------
+
+5. ADD PIN DURING ACTOR CREATION
+Enhancement:
+- When creating/selecting actor:
+  - Prompt for PIN (numeric, simple validation)
+  - Store PIN securely in localStorage (basic hash or plain for MVP)
+
+Data update:
+User:
+- name
+- participantSlot
+- pin
+
+-------------------------------------
+
+6. SETTINGS: CHANGE NAME + PIN
+Add a Settings screen:
+- Allow:
+  - Update user name
+  - Update PIN
+- Require current PIN before allowing change
+- Persist updates
+
+Routing:
+- Add `/settings`
+
+-------------------------------------
+
+7. PIN VALIDATION FLOW
+Enhancement:
+Require PIN validation for:
+- Logging into an actor
+- Switching identity
+- Changing PIN
+
+Flow:
+- Prompt for PIN input
+- Validate against stored PIN
+- If correct → proceed
+- If incorrect → show error message
+
+UX:
+- Use modal or inline prompt
+- Do not reload page
+
+-------------------------------------
+
+TECHNICAL EXPECTATIONS
+-------------------------------------
+
+- Use React state properly (useState/useEffect)
+- Avoid direct mutation of objects
+- Keep localStorage in sync with state
+- Use controlled inputs for forms
+- Ensure navigation works without reload
+
+-------------------------------------
+
+OUTPUT REQUIREMENTS
+-------------------------------------
+
+- Provide only modified files OR clearly highlight changes
+- Do not dump entire project again
+- Add brief explanation for each fix
+- Ensure code is clean and readable

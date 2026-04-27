@@ -29,6 +29,8 @@ export interface ClaimParticipantBody {
    * @maxLength 60
    */
   name: string;
+  /** @pattern ^[0-9]{4,8}$ */
+  pin: string;
 }
 
 export interface RenameParticipantBody {
@@ -37,6 +39,18 @@ export interface RenameParticipantBody {
    * @maxLength 60
    */
   name: string;
+}
+
+export interface ValidatePinBody {
+  /** @pattern ^[0-9]{4,8}$ */
+  pin: string;
+}
+
+export interface UpdatePinBody {
+  /** @pattern ^[0-9]{4,8}$ */
+  currentPin: string;
+  /** @pattern ^[0-9]{4,8}$ */
+  newPin: string;
 }
 
 export interface Item {
@@ -146,6 +160,11 @@ export interface ActivityEntry {
   participantName: string | null;
   createdAt: string;
 }
+
+export type ValidateParticipantPin200 = {
+  ok: boolean;
+  hasPin: boolean;
+};
 
 export type DeleteCategoryParams = {
   slot: ParticipantSlot;
