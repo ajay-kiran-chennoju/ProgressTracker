@@ -10,13 +10,22 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: participants
+    description: Participant operations
+  - name: days
+    description: Day entry operations
+  - name: categories
+    description: Category operations
+  - name: items
+    description: Item operations
+  - name: stats
+    description: Stats and summary operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +33,289 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /participants:
+    get:
+      operationId: listParticipants
+      tags: [participants]
+      summary: List both participants (slot A and B)
+      responses:
+        "200":
+          description: List of participants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Participant"
+
+  /participants/claim:
+    post:
+      operationId: claimParticipant
+      tags: [participants]
+      summary: Claim or update name for a participant slot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimParticipantBody"
+      responses:
+        "200":
+          description: The claimed participant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Participant"
+
+  /participants/{slot}:
+    patch:
+      operationId: renameParticipant
+      tags: [participants]
+      summary: Rename a participant
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ParticipantSlot"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameParticipantBody"
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Participant"
+
+  /days/{date}:
+    get:
+      operationId: getDay
+      tags: [days]
+      summary: Get the day view for a given date with both participants' data
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+            description: ISO date YYYY-MM-DD
+      responses:
+        "200":
+          description: Day view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DayView"
+
+  /months/{year}/{month}/active-days:
+    get:
+      operationId: getActiveDays
+      tags: [days]
+      summary: List active dates (with entries) for a given month
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: month
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: 1-12
+      responses:
+        "200":
+          description: Active dates summary for month
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActiveDay"
+
+  /categories:
+    post:
+      operationId: createCategory
+      tags: [categories]
+      summary: Create a category for a participant on a date
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCategoryBody"
+      responses:
+        "201":
+          description: Created category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /categories/{categoryId}:
+    get:
+      operationId: getCategory
+      tags: [categories]
+      summary: Get a category and its items
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Category detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryDetail"
+    patch:
+      operationId: updateCategory
+      tags: [categories]
+      summary: Rename a category
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCategoryBody"
+      responses:
+        "200":
+          description: Updated category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+    delete:
+      operationId: deleteCategory
+      tags: [categories]
+      summary: Delete a category
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slot
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/ParticipantSlot"
+      responses:
+        "204":
+          description: Deleted
+
+  /items:
+    post:
+      operationId: createItem
+      tags: [items]
+      summary: Add an item to a category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateItemBody"
+      responses:
+        "201":
+          description: Created item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+
+  /items/{itemId}:
+    patch:
+      operationId: updateItem
+      tags: [items]
+      summary: Edit an item's content
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateItemBody"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+    delete:
+      operationId: deleteItem
+      tags: [items]
+      summary: Delete an item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slot
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/ParticipantSlot"
+      responses:
+        "204":
+          description: Deleted
+
+  /stats/summary:
+    get:
+      operationId: getSummary
+      tags: [stats]
+      summary: Overall summary across both participants
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Summary"
+
+  /stats/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [stats]
+      summary: Recent items added across both participants
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Recent activity feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEntry"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +323,221 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ParticipantSlot:
+      type: string
+      enum: [A, B]
+
+    Participant:
+      type: object
+      properties:
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        name:
+          type: string
+          nullable: true
+      required: [slot, name]
+
+    ClaimParticipantBody:
+      type: object
+      properties:
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+      required: [slot, name]
+
+    RenameParticipantBody:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+      required: [name]
+
+    Item:
+      type: object
+      properties:
+        id:
+          type: string
+        categoryId:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+      required: [id, categoryId, content, createdAt]
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        date:
+          type: string
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        itemCount:
+          type: integer
+      required: [id, title, date, slot, itemCount]
+
+    CategoryWithItems:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        date:
+          type: string
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Item"
+      required: [id, title, date, slot, items]
+
+    CategoryDetail:
+      type: object
+      properties:
+        category:
+          $ref: "#/components/schemas/CategoryWithItems"
+        participant:
+          $ref: "#/components/schemas/Participant"
+      required: [category, participant]
+
+    ParticipantDay:
+      type: object
+      properties:
+        participant:
+          $ref: "#/components/schemas/Participant"
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryWithItems"
+      required: [participant, categories]
+
+    DayView:
+      type: object
+      properties:
+        date:
+          type: string
+        a:
+          $ref: "#/components/schemas/ParticipantDay"
+        b:
+          $ref: "#/components/schemas/ParticipantDay"
+      required: [date, a, b]
+
+    ActiveDay:
+      type: object
+      properties:
+        date:
+          type: string
+        aItemCount:
+          type: integer
+        bItemCount:
+          type: integer
+      required: [date, aItemCount, bItemCount]
+
+    CreateCategoryBody:
+      type: object
+      properties:
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        date:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+      required: [slot, date, title]
+
+    UpdateCategoryBody:
+      type: object
+      properties:
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+      required: [slot, title]
+
+    CreateItemBody:
+      type: object
+      properties:
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        categoryId:
+          type: string
+        content:
+          type: string
+          minLength: 1
+          maxLength: 500
+      required: [slot, categoryId, content]
+
+    UpdateItemBody:
+      type: object
+      properties:
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        content:
+          type: string
+          minLength: 1
+          maxLength: 500
+      required: [slot, content]
+
+    Summary:
+      type: object
+      properties:
+        a:
+          $ref: "#/components/schemas/ParticipantSummary"
+        b:
+          $ref: "#/components/schemas/ParticipantSummary"
+        totalDaysTracked:
+          type: integer
+      required: [a, b, totalDaysTracked]
+
+    ParticipantSummary:
+      type: object
+      properties:
+        participant:
+          $ref: "#/components/schemas/Participant"
+        totalItems:
+          type: integer
+        totalCategories:
+          type: integer
+        activeDays:
+          type: integer
+        currentStreak:
+          type: integer
+      required: [participant, totalItems, totalCategories, activeDays, currentStreak]
+
+    ActivityEntry:
+      type: object
+      properties:
+        itemId:
+          type: string
+        content:
+          type: string
+        categoryId:
+          type: string
+        categoryTitle:
+          type: string
+        date:
+          type: string
+        slot:
+          $ref: "#/components/schemas/ParticipantSlot"
+        participantName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required: [itemId, content, categoryId, categoryTitle, date, slot, participantName, createdAt]

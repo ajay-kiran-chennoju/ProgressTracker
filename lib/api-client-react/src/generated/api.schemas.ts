@@ -8,3 +8,153 @@
 export interface HealthStatus {
   status: string;
 }
+
+export type ParticipantSlot =
+  (typeof ParticipantSlot)[keyof typeof ParticipantSlot];
+
+export const ParticipantSlot = {
+  A: "A",
+  B: "B",
+} as const;
+
+export interface Participant {
+  slot: ParticipantSlot;
+  name: string | null;
+}
+
+export interface ClaimParticipantBody {
+  slot: ParticipantSlot;
+  /**
+   * @minLength 1
+   * @maxLength 60
+   */
+  name: string;
+}
+
+export interface RenameParticipantBody {
+  /**
+   * @minLength 1
+   * @maxLength 60
+   */
+  name: string;
+}
+
+export interface Item {
+  id: string;
+  categoryId: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface Category {
+  id: string;
+  title: string;
+  date: string;
+  slot: ParticipantSlot;
+  itemCount: number;
+}
+
+export interface CategoryWithItems {
+  id: string;
+  title: string;
+  date: string;
+  slot: ParticipantSlot;
+  items: Item[];
+}
+
+export interface CategoryDetail {
+  category: CategoryWithItems;
+  participant: Participant;
+}
+
+export interface ParticipantDay {
+  participant: Participant;
+  categories: CategoryWithItems[];
+}
+
+export interface DayView {
+  date: string;
+  a: ParticipantDay;
+  b: ParticipantDay;
+}
+
+export interface ActiveDay {
+  date: string;
+  aItemCount: number;
+  bItemCount: number;
+}
+
+export interface CreateCategoryBody {
+  slot: ParticipantSlot;
+  date: string;
+  /**
+   * @minLength 1
+   * @maxLength 80
+   */
+  title: string;
+}
+
+export interface UpdateCategoryBody {
+  slot: ParticipantSlot;
+  /**
+   * @minLength 1
+   * @maxLength 80
+   */
+  title: string;
+}
+
+export interface CreateItemBody {
+  slot: ParticipantSlot;
+  categoryId: string;
+  /**
+   * @minLength 1
+   * @maxLength 500
+   */
+  content: string;
+}
+
+export interface UpdateItemBody {
+  slot: ParticipantSlot;
+  /**
+   * @minLength 1
+   * @maxLength 500
+   */
+  content: string;
+}
+
+export interface ParticipantSummary {
+  participant: Participant;
+  totalItems: number;
+  totalCategories: number;
+  activeDays: number;
+  currentStreak: number;
+}
+
+export interface Summary {
+  a: ParticipantSummary;
+  b: ParticipantSummary;
+  totalDaysTracked: number;
+}
+
+export interface ActivityEntry {
+  itemId: string;
+  content: string;
+  categoryId: string;
+  categoryTitle: string;
+  date: string;
+  slot: ParticipantSlot;
+  participantName: string | null;
+  createdAt: string;
+}
+
+export type DeleteCategoryParams = {
+  slot: ParticipantSlot;
+};
+
+export type DeleteItemParams = {
+  slot: ParticipantSlot;
+};
+
+export type GetRecentActivityParams = {
+  limit?: number;
+};

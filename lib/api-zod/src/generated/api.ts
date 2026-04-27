@@ -8,9 +8,285 @@
 import * as zod from "zod";
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * @summary List both participants (slot A and B)
+ */
+export const ListParticipantsResponseItem = zod.object({
+  slot: zod.enum(["A", "B"]),
+  name: zod.string().nullable(),
+});
+export const ListParticipantsResponse = zod.array(ListParticipantsResponseItem);
+
+/**
+ * @summary Claim or update name for a participant slot
+ */
+export const claimParticipantBodyNameMax = 60;
+
+export const ClaimParticipantBody = zod.object({
+  slot: zod.enum(["A", "B"]),
+  name: zod.string().min(1).max(claimParticipantBodyNameMax),
+});
+
+export const ClaimParticipantResponse = zod.object({
+  slot: zod.enum(["A", "B"]),
+  name: zod.string().nullable(),
+});
+
+/**
+ * @summary Rename a participant
+ */
+export const RenameParticipantParams = zod.object({
+  slot: zod.enum(["A", "B"]),
+});
+
+export const renameParticipantBodyNameMax = 60;
+
+export const RenameParticipantBody = zod.object({
+  name: zod.string().min(1).max(renameParticipantBodyNameMax),
+});
+
+export const RenameParticipantResponse = zod.object({
+  slot: zod.enum(["A", "B"]),
+  name: zod.string().nullable(),
+});
+
+/**
+ * @summary Get the day view for a given date with both participants' data
+ */
+export const GetDayParams = zod.object({
+  date: zod.coerce.string(),
+});
+
+export const GetDayResponse = zod.object({
+  date: zod.string(),
+  a: zod.object({
+    participant: zod.object({
+      slot: zod.enum(["A", "B"]),
+      name: zod.string().nullable(),
+    }),
+    categories: zod.array(
+      zod.object({
+        id: zod.string(),
+        title: zod.string(),
+        date: zod.string(),
+        slot: zod.enum(["A", "B"]),
+        items: zod.array(
+          zod.object({
+            id: zod.string(),
+            categoryId: zod.string(),
+            content: zod.string(),
+            createdAt: zod.string(),
+          }),
+        ),
+      }),
+    ),
+  }),
+  b: zod.object({
+    participant: zod.object({
+      slot: zod.enum(["A", "B"]),
+      name: zod.string().nullable(),
+    }),
+    categories: zod.array(
+      zod.object({
+        id: zod.string(),
+        title: zod.string(),
+        date: zod.string(),
+        slot: zod.enum(["A", "B"]),
+        items: zod.array(
+          zod.object({
+            id: zod.string(),
+            categoryId: zod.string(),
+            content: zod.string(),
+            createdAt: zod.string(),
+          }),
+        ),
+      }),
+    ),
+  }),
+});
+
+/**
+ * @summary List active dates (with entries) for a given month
+ */
+export const GetActiveDaysParams = zod.object({
+  year: zod.coerce.number(),
+  month: zod.coerce.number(),
+});
+
+export const GetActiveDaysResponseItem = zod.object({
+  date: zod.string(),
+  aItemCount: zod.number(),
+  bItemCount: zod.number(),
+});
+export const GetActiveDaysResponse = zod.array(GetActiveDaysResponseItem);
+
+/**
+ * @summary Create a category for a participant on a date
+ */
+export const createCategoryBodyTitleMax = 80;
+
+export const CreateCategoryBody = zod.object({
+  slot: zod.enum(["A", "B"]),
+  date: zod.string(),
+  title: zod.string().min(1).max(createCategoryBodyTitleMax),
+});
+
+/**
+ * @summary Get a category and its items
+ */
+export const GetCategoryParams = zod.object({
+  categoryId: zod.coerce.string(),
+});
+
+export const GetCategoryResponse = zod.object({
+  category: zod.object({
+    id: zod.string(),
+    title: zod.string(),
+    date: zod.string(),
+    slot: zod.enum(["A", "B"]),
+    items: zod.array(
+      zod.object({
+        id: zod.string(),
+        categoryId: zod.string(),
+        content: zod.string(),
+        createdAt: zod.string(),
+      }),
+    ),
+  }),
+  participant: zod.object({
+    slot: zod.enum(["A", "B"]),
+    name: zod.string().nullable(),
+  }),
+});
+
+/**
+ * @summary Rename a category
+ */
+export const UpdateCategoryParams = zod.object({
+  categoryId: zod.coerce.string(),
+});
+
+export const updateCategoryBodyTitleMax = 80;
+
+export const UpdateCategoryBody = zod.object({
+  slot: zod.enum(["A", "B"]),
+  title: zod.string().min(1).max(updateCategoryBodyTitleMax),
+});
+
+export const UpdateCategoryResponse = zod.object({
+  id: zod.string(),
+  title: zod.string(),
+  date: zod.string(),
+  slot: zod.enum(["A", "B"]),
+  itemCount: zod.number(),
+});
+
+/**
+ * @summary Delete a category
+ */
+export const DeleteCategoryParams = zod.object({
+  categoryId: zod.coerce.string(),
+});
+
+export const DeleteCategoryQueryParams = zod.object({
+  slot: zod.enum(["A", "B"]),
+});
+
+/**
+ * @summary Add an item to a category
+ */
+export const createItemBodyContentMax = 500;
+
+export const CreateItemBody = zod.object({
+  slot: zod.enum(["A", "B"]),
+  categoryId: zod.string(),
+  content: zod.string().min(1).max(createItemBodyContentMax),
+});
+
+/**
+ * @summary Edit an item's content
+ */
+export const UpdateItemParams = zod.object({
+  itemId: zod.coerce.string(),
+});
+
+export const updateItemBodyContentMax = 500;
+
+export const UpdateItemBody = zod.object({
+  slot: zod.enum(["A", "B"]),
+  content: zod.string().min(1).max(updateItemBodyContentMax),
+});
+
+export const UpdateItemResponse = zod.object({
+  id: zod.string(),
+  categoryId: zod.string(),
+  content: zod.string(),
+  createdAt: zod.string(),
+});
+
+/**
+ * @summary Delete an item
+ */
+export const DeleteItemParams = zod.object({
+  itemId: zod.coerce.string(),
+});
+
+export const DeleteItemQueryParams = zod.object({
+  slot: zod.enum(["A", "B"]),
+});
+
+/**
+ * @summary Overall summary across both participants
+ */
+export const GetSummaryResponse = zod.object({
+  a: zod.object({
+    participant: zod.object({
+      slot: zod.enum(["A", "B"]),
+      name: zod.string().nullable(),
+    }),
+    totalItems: zod.number(),
+    totalCategories: zod.number(),
+    activeDays: zod.number(),
+    currentStreak: zod.number(),
+  }),
+  b: zod.object({
+    participant: zod.object({
+      slot: zod.enum(["A", "B"]),
+      name: zod.string().nullable(),
+    }),
+    totalItems: zod.number(),
+    totalCategories: zod.number(),
+    activeDays: zod.number(),
+    currentStreak: zod.number(),
+  }),
+  totalDaysTracked: zod.number(),
+});
+
+/**
+ * @summary Recent items added across both participants
+ */
+export const getRecentActivityQueryLimitDefault = 10;
+
+export const GetRecentActivityQueryParams = zod.object({
+  limit: zod.coerce.number().default(getRecentActivityQueryLimitDefault),
+});
+
+export const GetRecentActivityResponseItem = zod.object({
+  itemId: zod.string(),
+  content: zod.string(),
+  categoryId: zod.string(),
+  categoryTitle: zod.string(),
+  date: zod.string(),
+  slot: zod.enum(["A", "B"]),
+  participantName: zod.string().nullable(),
+  createdAt: zod.string(),
+});
+export const GetRecentActivityResponse = zod.array(
+  GetRecentActivityResponseItem,
+);

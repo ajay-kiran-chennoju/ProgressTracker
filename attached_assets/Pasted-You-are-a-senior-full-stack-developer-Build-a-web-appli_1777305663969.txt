@@ -1,0 +1,112 @@
+You are a senior full-stack developer.
+
+Build a web application for tracking daily progress across two participants.
+
+IMPORTANT CONSTRAINT:
+- Do NOT use the word "couple" anywhere in:
+  - UI text
+  - URLs
+  - variable names exposed to frontend
+- Use neutral terms like:
+  - "Participant A / Participant B"
+  - "User 1 / User 2"
+  - or dynamic names entered by users
+
+TECH STACK:
+- Frontend: React (functional components + hooks)
+- Backend: Node.js + Express (or Next.js API routes)
+- Database: PostgreSQL (preferred) or MongoDB
+- Styling: Tailwind CSS (minimal, clean UI)
+
+CORE IDEA:
+The app allows two participants to track daily activities such as workout, coding, reading, etc.
+
+USER IDENTIFICATION:
+- No full authentication system required.
+- On first visit:
+  - Prompt for "Your Name"
+  - Assign the user to one of two participant slots
+  - Store this in localStorage
+- Based on this:
+  - Only allow editing on that participant’s side
+  - The other side must be read-only
+
+HOME PAGE:
+- Display a calendar view of the current month
+- Each date should be clickable
+- Optionally highlight dates with entries
+
+DAY VIEW (on clicking a date):
+- Layout split into two vertical sections
+- Each section represents one participant
+- Each section includes:
+  - A list of categories (e.g., Workout, Coding, Reading)
+  - Ability to add new categories (only if editable)
+  - Each category contains:
+    - Title (clickable)
+    - List of string entries
+
+CATEGORY DETAIL PAGE:
+- On clicking a category:
+  - Navigate to a new page
+  - Display:
+    - Category title
+    - List of entries (strings)
+    - Ability to add entries (only if editable)
+
+DATA MODEL (suggested):
+User:
+- id
+- name
+- participantSlot (A or B)
+
+DayEntry:
+- id
+- date
+- userId
+
+Category:
+- id
+- title
+- dayEntryId
+
+Item:
+- id
+- content (string)
+- categoryId
+
+PERMISSIONS:
+- A participant can:
+  - Create/update/delete categories on their side
+  - Create/update/delete items in their categories
+- The other participant’s data is strictly read-only
+
+ROUTING:
+- `/` → calendar view
+- `/day/:date` → day view
+- `/category/:id` → category detail
+
+UI REQUIREMENTS:
+- Responsive design
+- Clearly separated columns for each participant
+- Visual cues for editable vs read-only sections
+- Clean and minimal design
+
+BONUS FEATURES:
+- Highlight active days
+- Smooth transitions/animations
+- Optimistic UI updates
+- Ability to rename participants
+
+OUTPUT REQUIREMENTS:
+- Full working code
+- Folder structure
+- Setup instructions
+- Sample seed data
+
+ENGINEERING EXPECTATIONS:
+- Clean, modular architecture
+- Separation of concerns
+- Reusable components
+- Error handling and validation
+- Avoid over-engineering but ensure scalability
