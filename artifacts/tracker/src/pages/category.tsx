@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "wouter";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, parse } from "date-fns";
 import { 
   useGetCategory, 
   getGetCategoryQueryKey,
@@ -24,6 +24,37 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { normalize, getItemSuggestions } from "@/utils/suggestions";
+
+function SuggestionList({ 
+  suggestions, 
+  onSelect, 
+  highlight 
+}: { 
+  suggestions: string[], 
+  onSelect: (s: string) => void,
+  highlight: string
+}) {
+  if (suggestions.length === 0) return null;
+  return (
+    <div className="absolute z-50 w-full mt-1 bg-background border border-border rounded-md shadow-lg max-h-48 overflow-auto animate-in fade-in zoom-in-95 duration-100">
+      {suggestions.map((s, i) => (
+        <button
+          key={i}
+          className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors border-b border-border/20 last:border-0"
+          onClick={() => onSelect(s)}
+        >
+          {s.toLowerCase().startsWith(highlight.toLowerCase()) ? (
+            <>
+              <span className="font-bold text-primary">{s.substring(0, highlight.length)}</span>
+              <span>{s.substring(highlight.length)}</span>
+            </>
+          ) : s}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function CategoryDetail() {
   const { id } = useParams();
@@ -40,6 +71,8 @@ export default function CategoryDetail() {
 
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemContent, setNewItemContent] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [allContents, setAllContents] = useState<string[]>([]);
   
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editItemContent, setEditItemContent] = useState("");
@@ -48,7 +81,27 @@ export default function CategoryDetail() {
   const updateItem = useUpdateItem();
   const deleteItem = useDeleteItem();
 
-  if (isLoading || !data) {
+  const category = data?.category;
+  const participant = data?.participant;
+  const isEditable = user?.slot === category?.slot;
+
+  useEffect(() => {
+    if (isAddingItem && category?.id) {
+      fetch(`/api/items/suggestions?categoryId=${category.id}`)
+        .then(res => res.json())
+        .then(data => setAllContents(data))
+        .catch(() => {});
+    }
+  }, [isAddingItem, category?.id]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSuggestions(getItemSuggestions(newItemContent, allContents));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [newItemContent, allContents]);
+
+  if (isLoading || !data || !category || !participant) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
@@ -56,17 +109,27 @@ export default function CategoryDetail() {
     );
   }
 
-  const { category, participant } = data;
-  const isEditable = user?.slot === category.slot;
+  const handleCreateItem = async (overrideContent?: string) => {
+    const contentToSave = (overrideContent || newItemContent).trim();
+    if (!contentToSave) return;
 
-  const handleCreateItem = async () => {
-    if (!newItemContent.trim()) return;
+    // Duplicate Check: Check if this exact item was already added TODAY
+    const todayStr = new Date().toISOString().split('T')[0];
+    const existsToday = category.items.some(
+      (i: any) => normalize(i.content) === normalize(contentToSave) && i.createdAt.startsWith(todayStr)
+    );
+    if (existsToday) {
+      toast({ description: "Already added today", variant: "destructive" });
+      return;
+    }
+
     try {
       await createItem.mutateAsync({
         data: {
           slot: category.slot,
           categoryId: category.id,
-          content: newItemContent.trim()
+          content: contentToSave,
+          date: todayStr
         }
       });
       setNewItemContent("");
@@ -105,10 +168,10 @@ export default function CategoryDetail() {
   return (
     <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full px-4 md:px-8 py-6 animate-in fade-in duration-500">
       <div className="mb-8">
-        <Link href={`/day/${category.date}`} className="inline-flex items-center text-sm text-muted-foreground hover:text-primary transition-colors mb-4">
+        <button onClick={() => window.history.back()} className="inline-flex items-center text-sm text-muted-foreground hover:text-primary transition-colors mb-4">
           <ChevronLeft className="h-4 w-4 mr-1" />
-          Back to {format(parseISO(category.date), "MMMM d")}
-        </Link>
+          Back
+        </button>
         
         <h1 className="font-serif text-3xl md:text-4xl font-medium text-foreground mb-2">
           {category.title}
@@ -116,7 +179,7 @@ export default function CategoryDetail() {
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="font-medium text-foreground/70">{participant.name || `Participant ${participant.slot}`}</span>
           <span>•</span>
-          <span>{format(parseISO(category.date), "EEEE, MMMM d, yyyy")}</span>
+          <span>All Entries</span>
           {!isEditable && (
             <>
               <span>•</span>
@@ -182,7 +245,7 @@ export default function CategoryDetail() {
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground mt-2 opacity-50">
-                    {format(parseISO(item.createdAt), "h:mm a")}
+                    {item.date ? format(parse(item.date, "yyyy-MM-dd", new Date()), "MMM d, yyyy") : "No Date"} • {item.createdAt ? format(parseISO(item.createdAt), "h:mm a") : "No Time"}
                   </p>
                 </div>
               )}
@@ -190,58 +253,14 @@ export default function CategoryDetail() {
           ))}
         </AnimatePresence>
 
-        {category.items.length === 0 && !isAddingItem && (
+        {category.items.length === 0 && (
           <div className="py-12 text-center border-2 border-dashed border-border/50 rounded-xl bg-card/30">
-            <p className="text-muted-foreground mb-4">No entries yet in this category.</p>
-            {isEditable && (
-              <Button variant="outline" onClick={() => setIsAddingItem(true)}>
-                <Plus className="h-4 w-4 mr-2" /> Add the first entry
-              </Button>
-            )}
+            <p className="text-muted-foreground">No entries yet in this category.</p>
           </div>
         )}
 
         {isEditable && (
           <div className="pt-6 border-t border-border/30">
-            {isAddingItem ? (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-                <Textarea 
-                  autoFocus
-                  placeholder="What's on your mind?..." 
-                  value={newItemContent}
-                  onChange={(e) => setNewItemContent(e.target.value)}
-                  className="min-h-[120px] text-base resize-y bg-muted/20 focus-visible:ring-primary/30"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.metaKey) handleCreateItem();
-                  }}
-                />
-                <div className="flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground">Press <kbd className="px-1 py-0.5 rounded bg-muted">Cmd/Ctrl</kbd> + <kbd className="px-1 py-0.5 rounded bg-muted">Enter</kbd> to save</p>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" onClick={() => {
-                      setIsAddingItem(false);
-                      setNewItemContent("");
-                    }}>Cancel</Button>
-                    <Button onClick={handleCreateItem} disabled={!newItemContent.trim() || createItem.isPending}>
-                      {createItem.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-                      Add Entry
-                    </Button>
-                  </div>
-                </div>
-              </motion.div>
-            ) : (
-              category.items.length > 0 && (
-                <Button 
-                  size="lg"
-                  variant="outline" 
-                  className="w-full text-muted-foreground hover:text-primary hover:bg-primary/5 transition-all duration-300 rounded-xl"
-                  onClick={() => setIsAddingItem(true)}
-                >
-                  <Plus className="h-5 w-5 mr-2" />
-                  Add another entry
-                </Button>
-              )
-            )}
           </div>
         )}
       </div>

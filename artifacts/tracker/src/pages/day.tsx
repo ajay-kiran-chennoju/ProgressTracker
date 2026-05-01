@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation, useParams, Link } from "wouter";
-import { format, parseISO, addDays, subDays } from "date-fns";
+import { format, parseISO, addDays, subDays, parse } from "date-fns";
 import { 
   useGetDay, 
   getGetDayQueryKey,
@@ -36,6 +36,37 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { normalize, getCategorySuggestions, getItemSuggestions } from "@/utils/suggestions";
+
+function SuggestionList({ 
+  suggestions, 
+  onSelect, 
+  highlight 
+}: { 
+  suggestions: string[], 
+  onSelect: (s: string) => void,
+  highlight: string
+}) {
+  if (suggestions.length === 0) return null;
+  return (
+    <div className="absolute z-50 w-full mt-1 bg-background border border-border rounded-md shadow-lg max-h-48 overflow-auto animate-in fade-in zoom-in-95 duration-100">
+      {suggestions.map((s, i) => (
+        <button
+          key={i}
+          className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors border-b border-border/20 last:border-0"
+          onClick={() => onSelect(s)}
+        >
+          {s.toLowerCase().startsWith(highlight.toLowerCase()) ? (
+            <>
+              <span className="font-bold text-primary">{s.substring(0, highlight.length)}</span>
+              <span>{s.substring(highlight.length)}</span>
+            </>
+          ) : s}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function DayView() {
   const { date } = useParams();
@@ -125,17 +156,66 @@ function ParticipantColumn({
 }) {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryTitle, setNewCategoryTitle] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [allTitles, setAllTitles] = useState<{id: string, title: string}[]>([]);
+  const [, setLocation] = useLocation();
   const createCategory = useCreateCategory();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
-  const handleCreateCategory = async () => {
-    if (!newCategoryTitle.trim()) return;
+  useEffect(() => {
+    if (isAddingCategory) {
+      // Fetch unique categories for suggestions
+      fetch(`/api/categories/unique?slot=${slot}`)
+        .then(res => res.json())
+        .then(data => setAllTitles(data))
+        .catch(() => {});
+    }
+  }, [isAddingCategory, slot]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSuggestions(getCategorySuggestions(newCategoryTitle, allTitles.map(c => c.title)));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [newCategoryTitle, allTitles]);
+
+  const handleCreateCategory = async (overrideTitle?: string) => {
+    const titleToSave = (overrideTitle || newCategoryTitle).trim();
+    if (!titleToSave) return;
+
+    // Check if category already exists globally
+    const existingCat = allTitles.find(
+      (c) => normalize(c.title) === normalize(titleToSave)
+    );
+    if (existingCat) {
+      // Add it to the local view immediately so they can add items.
+      // Once an item is added, it persists for this day because days.ts fetches categories that have items on this day.
+      queryClient.setQueryData(getGetDayQueryKey(date), (old: any) => {
+        if (!old) return old;
+        const sideKey = slot.toLowerCase() as "a" | "b";
+        const side = old[sideKey];
+        if (side.categories.some((c: any) => c.id === existingCat.id)) return old;
+        
+        return {
+          ...old,
+          [sideKey]: {
+            ...side,
+            categories: [...side.categories, { ...existingCat, slot, items: [] }]
+          }
+        };
+      });
+      setNewCategoryTitle("");
+      setIsAddingCategory(false);
+      return;
+    }
+
     try {
       await createCategory.mutateAsync({
         data: {
           slot,
           date,
-          title: newCategoryTitle.trim()
+          title: titleToSave
         }
       });
       setNewCategoryTitle("");
@@ -186,7 +266,7 @@ function ParticipantColumn({
           <div className="pt-2">
             {isAddingCategory ? (
               <Card className="border-primary/30 shadow-sm overflow-hidden">
-                <div className="p-3 bg-muted/30">
+                <div className="p-3 bg-muted/30 relative">
                   <Input 
                     autoFocus
                     placeholder="e.g. Work, Workout, Thoughts..." 
@@ -194,19 +274,30 @@ function ParticipantColumn({
                     onChange={(e) => setNewCategoryTitle(e.target.value)}
                     className="border-0 focus-visible:ring-1 focus-visible:ring-primary/50 bg-background"
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") handleCreateCategory();
+                      if (e.key === "Enter") {
+                        if (suggestions.length > 0 && normalize(suggestions[0]) !== normalize(newCategoryTitle)) {
+                          handleCreateCategory(suggestions[0]);
+                        } else {
+                          handleCreateCategory();
+                        }
+                      }
                       if (e.key === "Escape") {
                         setIsAddingCategory(false);
                         setNewCategoryTitle("");
                       }
                     }}
                   />
+                  <SuggestionList 
+                    suggestions={suggestions} 
+                    onSelect={(s) => handleCreateCategory(s)} 
+                    highlight={newCategoryTitle}
+                  />
                   <div className="flex justify-end gap-2 mt-3">
                     <Button size="sm" variant="ghost" onClick={() => {
                       setIsAddingCategory(false);
                       setNewCategoryTitle("");
                     }}>Cancel</Button>
-                    <Button size="sm" onClick={handleCreateCategory} disabled={!newCategoryTitle.trim() || createCategory.isPending}>
+                    <Button size="sm" onClick={() => handleCreateCategory()} disabled={!newCategoryTitle.trim() || createCategory.isPending}>
                       {createCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
                     </Button>
                   </div>
@@ -244,6 +335,8 @@ function CategoryCard({
 }) {
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemContent, setNewItemContent] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [allContents, setAllContents] = useState<string[]>([]);
   const [editTitleOpen, setEditTitleOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(category.title);
   
@@ -254,14 +347,42 @@ function CategoryCard({
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const handleCreateItem = async () => {
-    if (!newItemContent.trim()) return;
+  useEffect(() => {
+    if (isAddingItem) {
+      fetch(`/api/items/suggestions?categoryId=${category.id}`)
+        .then(res => res.json())
+        .then(data => setAllContents(data))
+        .catch(() => {});
+    }
+  }, [isAddingItem, category.id]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSuggestions(getItemSuggestions(newItemContent, allContents));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [newItemContent, allContents]);
+
+  const handleCreateItem = async (overrideContent?: string) => {
+    const contentToSave = (overrideContent || newItemContent).trim();
+    if (!contentToSave) return;
+
+    // Duplicate Check: Check if this exact item was already added TODAY to this category
+    const existsToday = category.items.some(
+      (item: any) => normalize(item.content) === normalize(contentToSave)
+    );
+    if (existsToday) {
+      toast({ description: "Already added today", variant: "destructive" });
+      return;
+    }
+
     try {
       await createItem.mutateAsync({
         data: {
           slot,
           categoryId: category.id,
-          content: newItemContent.trim()
+          content: contentToSave,
+          date
         }
       });
       setNewItemContent("");
@@ -373,7 +494,7 @@ function CategoryCard({
           {isEditable && (
             <div className="pt-2">
               {isAddingItem ? (
-                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2 relative">
                   <Textarea 
                     autoFocus
                     placeholder="Type here..." 
@@ -383,7 +504,11 @@ function CategoryCard({
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        handleCreateItem();
+                        if (suggestions.length > 0 && normalize(suggestions[0]) !== normalize(newItemContent)) {
+                          handleCreateItem(suggestions[0]);
+                        } else {
+                          handleCreateItem();
+                        }
                       }
                       if (e.key === "Escape") {
                         setIsAddingItem(false);
@@ -391,12 +516,17 @@ function CategoryCard({
                       }
                     }}
                   />
+                  <SuggestionList 
+                    suggestions={suggestions} 
+                    onSelect={(s) => handleCreateItem(s)} 
+                    highlight={newItemContent}
+                  />
                   <div className="flex justify-end gap-2">
                     <Button size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={() => {
                       setIsAddingItem(false);
                       setNewItemContent("");
                     }}>Cancel</Button>
-                    <Button size="sm" className="h-8 px-3 text-xs" onClick={handleCreateItem} disabled={!newItemContent.trim() || createItem.isPending}>
+                    <Button size="sm" className="h-8 px-3 text-xs" onClick={() => handleCreateItem()} disabled={!newItemContent.trim() || createItem.isPending}>
                       {createItem.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save (Enter)'}
                     </Button>
                   </div>

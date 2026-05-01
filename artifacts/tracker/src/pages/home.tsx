@@ -10,8 +10,9 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, isSameMonth, parseISO } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { Loader2, Flame, LayoutList, Layers } from "lucide-react";
+import { Loader2, Flame, LayoutList, Layers, Folder } from "lucide-react";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useQuery } from "@tanstack/react-query";
 
 export default function Home() {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
@@ -30,6 +31,17 @@ export default function Home() {
 
   const { data: summary, isLoading: summaryLoading } = useGetSummary();
   const { data: recentActivity, isLoading: recentLoading } = useGetRecentActivity({ limit: 5 });
+
+  const { data: uniqueCategories, isLoading: categoriesLoading } = useQuery({
+    queryKey: ['categories', 'unique', user?.slot],
+    queryFn: async () => {
+      if (!user?.slot) return [];
+      const res = await fetch(`/api/categories/unique?slot=${user.slot}`);
+      if (!res.ok) throw new Error("Failed to fetch unique categories");
+      return res.json() as Promise<{id: string, title: string}[]>;
+    },
+    enabled: !!user?.slot,
+  });
 
   const modifiers = useMemo(() => {
     if (!activeDays) return {};
@@ -72,23 +84,7 @@ export default function Home() {
                 onSelect={(day) => day && handleDayClick(day)}
                 modifiers={modifiers}
                 modifiersStyles={modifiersStyles}
-                className="rounded-md border-0 w-full max-w-md mx-auto"
-                classNames={{
-                  months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-                  month: "space-y-4 w-full",
-                  table: "w-full border-collapse space-y-1",
-                  head_row: "flex w-full justify-between",
-                  head_cell: "text-muted-foreground rounded-md w-9 sm:w-12 font-normal text-[0.8rem]",
-                  row: "flex w-full mt-2 justify-between",
-                  cell: "text-center text-sm p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-                  day: "h-9 w-9 sm:h-12 sm:w-12 p-0 font-normal aria-selected:opacity-100 hover:bg-muted rounded-md transition-colors",
-                  day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
-                  day_today: "bg-accent text-accent-foreground font-semibold",
-                  day_outside: "text-muted-foreground opacity-50",
-                  day_disabled: "text-muted-foreground opacity-50",
-                  day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
-                  day_hidden: "invisible",
-                }}
+                className="w-full max-w-sm mx-auto"
               />
             </CardContent>
           </Card>
@@ -188,6 +184,37 @@ export default function Home() {
                 </Card>
               )}
             </>
+          )}
+
+          {uniqueCategories && uniqueCategories.length > 0 && (
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3 border-b border-border/40">
+                <CardTitle className="text-lg font-medium flex items-center gap-2">
+                  <Folder className="h-5 w-5 text-primary/70" />
+                  Your Categories
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-border/40">
+                  {uniqueCategories.map((cat, i) => (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      key={cat.id} 
+                      className="p-4 hover:bg-muted/30 transition-colors"
+                    >
+                      <Link href={`/category/${cat.id}`} className="block flex items-center justify-between">
+                        <span className="text-sm font-medium text-foreground">
+                          {cat.title}
+                        </span>
+                        <Layers className="h-4 w-4 text-muted-foreground opacity-50" />
+                      </Link>
+                    </motion.div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {!summary && summaryLoading && (

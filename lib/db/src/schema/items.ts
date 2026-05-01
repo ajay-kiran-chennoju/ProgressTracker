@@ -10,6 +10,7 @@ export const itemsTable = pgTable(
       .notNull()
       .references(() => categoriesTable.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
+    date: varchar("date", { length: 10 }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

@@ -450,9 +450,11 @@ components:
           type: string
         content:
           type: string
+        date:
+          type: string
         createdAt:
           type: string
-      required: [id, categoryId, content, createdAt]
+      required: [id, categoryId, content, date, createdAt]
 
     Category:
       type: object
@@ -563,7 +565,9 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-      required: [slot, categoryId, content]
+        date:
+          type: string
+      required: [slot, categoryId, content, date]
 
     UpdateItemBody:
       type: object

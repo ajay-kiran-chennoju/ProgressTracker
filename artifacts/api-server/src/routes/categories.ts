@@ -14,6 +14,43 @@ import { listAllParticipants, type Slot } from "../lib/participants";
 const router: IRouter = Router();
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SLOT_RE = /^[AB]$/;
+
+router.get("/categories/suggestions", async (req, res) => {
+  const { slot } = req.query;
+  let baseQuery = db.selectDistinct({ title: categoriesTable.title }).from(categoriesTable);
+  
+  if (slot && typeof slot === "string") {
+    baseQuery = baseQuery.where(eq(categoriesTable.slot, slot)) as any;
+  }
+  
+  const titles = await baseQuery;
+  res.json(titles.map(t => t.title));
+});
+
+router.get("/categories/unique", async (req, res) => {
+  const { slot } = req.query;
+  if (!slot || typeof slot !== "string") {
+    res.status(400).json({ error: "Slot required" });
+    return;
+  }
+  
+  const allCats = await db
+    .select({ id: categoriesTable.id, title: categoriesTable.title, createdAt: categoriesTable.createdAt })
+    .from(categoriesTable)
+    .where(eq(categoriesTable.slot, slot))
+    .orderBy(asc(categoriesTable.createdAt));
+  
+  const uniqueMap = new Map();
+  for (const c of allCats) {
+    const norm = c.title.trim().toLowerCase();
+    if (!uniqueMap.has(norm)) {
+      uniqueMap.set(norm, { id: c.id, title: c.title });
+    }
+  }
+  
+  res.json(Array.from(uniqueMap.values()));
+});
 
 router.post("/categories", async (req, res) => {
   const body = CreateCategoryBody.safeParse(req.body);
@@ -59,11 +96,27 @@ router.get("/categories/:categoryId", async (req, res) => {
     res.status(404).json({ error: "Category not found" });
     return;
   }
-  const items = await db
-    .select()
-    .from(itemsTable)
-    .where(eq(itemsTable.categoryId, cat.id))
-    .orderBy(asc(itemsTable.createdAt));
+
+  // Find all categories for this slot with the same normalized title
+  const normTitle = cat.title.trim().toLowerCase();
+  const allSlotCats = await db
+    .select({ id: categoriesTable.id, title: categoriesTable.title })
+    .from(categoriesTable)
+    .where(eq(categoriesTable.slot, cat.slot));
+    
+  const matchingCatIds = allSlotCats
+    .filter(c => c.title.trim().toLowerCase() === normTitle)
+    .map(c => c.id);
+
+  let items: any[] = [];
+  if (matchingCatIds.length > 0) {
+    // Drizzle currently has limited support for IN with empty arrays, but length is > 0 here
+    items = await db
+      .select()
+      .from(itemsTable)
+      .where(sql`${itemsTable.categoryId} IN (${sql.join(matchingCatIds.map(id => sql`${id}`), sql`, `)})`)
+      .orderBy(sql`${itemsTable.createdAt} desc`);
+  }
 
   const participants = await listAllParticipants();
   const participant = participants.find((p) => p.slot === cat.slot)!;
@@ -78,6 +131,7 @@ router.get("/categories/:categoryId", async (req, res) => {
         id: i.id,
         categoryId: i.categoryId,
         content: i.content,
+        date: i.date,
         createdAt: i.createdAt.toISOString(),
       })),
     },

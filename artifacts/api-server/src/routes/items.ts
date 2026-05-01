@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, categoriesTable, itemsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   CreateItemBody,
   UpdateItemBody,
@@ -10,6 +10,50 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+router.get("/items/suggestions", async (req, res) => {
+  const { categoryId } = req.query;
+  if (!categoryId || typeof categoryId !== "string") {
+    res.status(400).json({ error: "categoryId required" });
+    return;
+  }
+  
+  // Find the category to get its title and slot
+  const [cat] = await db
+    .select()
+    .from(categoriesTable)
+    .where(eq(categoriesTable.id, categoryId))
+    .limit(1);
+
+  if (!cat) {
+    res.json([]);
+    return;
+  }
+
+  // Find all categories with the same title and slot
+  const normTitle = cat.title.trim().toLowerCase();
+  const allSlotCats = await db
+    .select({ id: categoriesTable.id, title: categoriesTable.title })
+    .from(categoriesTable)
+    .where(eq(categoriesTable.slot, cat.slot));
+    
+  const matchingCatIds = allSlotCats
+    .filter(c => c.title.trim().toLowerCase() === normTitle)
+    .map(c => c.id);
+
+  if (matchingCatIds.length === 0) {
+    res.json([]);
+    return;
+  }
+
+  // Fetch items for all matching category IDs
+  const items = await db
+    .select({ content: itemsTable.content })
+    .from(itemsTable)
+    .where(sql`${itemsTable.categoryId} IN (${sql.join(matchingCatIds.map(id => sql`${id}`), sql`, `)})`);
+    
+  res.json(items.map(i => i.content));
+});
 
 router.post("/items", async (req, res) => {
   const body = CreateItemBody.safeParse(req.body);
@@ -37,12 +81,13 @@ router.post("/items", async (req, res) => {
   }
   const [row] = await db
     .insert(itemsTable)
-    .values({ categoryId: body.data.categoryId, content: trimmed })
+    .values({ categoryId: body.data.categoryId, content: trimmed, date: body.data.date })
     .returning();
   res.status(201).json({
     id: row.id,
     categoryId: row.categoryId,
     content: row.content,
+    date: row.date,
     createdAt: row.createdAt.toISOString(),
   });
 });

@@ -9,7 +9,7 @@ async function run() {
     const res = await client.query('SELECT table_name FROM information_schema.tables WHERE table_schema = \'public\'');
     console.log('Tables:', res.rows.map(r => r.table_name));
     await client.end();
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error:', err.stack);
     process.exit(1);
   }

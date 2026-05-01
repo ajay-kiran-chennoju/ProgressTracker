@@ -25,8 +25,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port,
-    host: "localhost",
+    port: 5173,
+    host: "0.0.0.0",
     proxy: {
       "/api": {
         target: process.env.VITE_API_URL || "http://localhost:3000",
@@ -35,7 +35,7 @@ export default defineConfig({
     },
   },
   preview: {
-    port,
-    host: "localhost",
+    port: 5173,
+    host: "0.0.0.0",
   },
 });
