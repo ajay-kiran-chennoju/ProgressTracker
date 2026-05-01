@@ -5,6 +5,7 @@ import daysRouter from "./days";
 import categoriesRouter from "./categories";
 import itemsRouter from "./items";
 import statsRouter from "./stats";
+import suggestionsRouter from "./suggestions";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(daysRouter);
 router.use(categoriesRouter);
 router.use(itemsRouter);
 router.use(statsRouter);
+router.use(suggestionsRouter);
 
 export default router;

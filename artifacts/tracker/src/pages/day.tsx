@@ -15,6 +15,9 @@ import {
   Item
 } from "@workspace/api-client-react";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useCategorySuggestions, useItemSuggestions } from "@/hooks/use-suggestions";
+import { isDuplicate } from "@/utils/suggestions";
+import { AutocompleteInput } from "@/components/autocomplete-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -125,23 +128,33 @@ function ParticipantColumn({
 }) {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryTitle, setNewCategoryTitle] = useState("");
+  const [categorySuggestions, setCategorySuggestions] = useState<string[]>([]);
   const createCategory = useCreateCategory();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { getSuggestions: getCatSuggestions, invalidate: invalidateCatCache } = useCategorySuggestions();
+
+  const existingTitles: string[] = data.categories.map((c: CategoryWithItems) => c.title);
 
   const handleCreateCategory = async () => {
-    if (!newCategoryTitle.trim()) return;
+    const trimmed = newCategoryTitle.trim();
+    if (!trimmed) return;
+    if (isDuplicate(trimmed, existingTitles)) {
+      toast({ title: "Already exists", description: "This category already exists for today.", variant: "destructive" });
+      return;
+    }
     try {
-      await createCategory.mutateAsync({
-        data: {
-          slot,
-          date,
-          title: newCategoryTitle.trim()
-        }
-      });
+      await createCategory.mutateAsync({ data: { slot, date, title: trimmed } });
+      invalidateCatCache();
       setNewCategoryTitle("");
+      setCategorySuggestions([]);
       setIsAddingCategory(false);
       queryClient.invalidateQueries({ queryKey: getGetDayQueryKey(date) });
-    } catch (e) {}
+    } catch (e: any) {
+      if (e?.response?.status === 409) {
+        toast({ title: "Already exists", variant: "destructive" });
+      }
+    }
   };
 
   return (
@@ -187,17 +200,26 @@ function ParticipantColumn({
             {isAddingCategory ? (
               <Card className="border-primary/30 shadow-sm overflow-hidden">
                 <div className="p-3 bg-muted/30">
-                  <Input 
+                  <AutocompleteInput
                     autoFocus
-                    placeholder="e.g. Work, Workout, Thoughts..." 
+                    placeholder="e.g. Work, Workout, Thoughts..."
                     value={newCategoryTitle}
-                    onChange={(e) => setNewCategoryTitle(e.target.value)}
+                    onChange={(v) => {
+                      setNewCategoryTitle(v);
+                      getCatSuggestions(v, setCategorySuggestions);
+                    }}
+                    suggestions={categorySuggestions}
+                    onSuggestionSelect={(v) => {
+                      setNewCategoryTitle(v);
+                      setCategorySuggestions([]);
+                    }}
                     className="border-0 focus-visible:ring-1 focus-visible:ring-primary/50 bg-background"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleCreateCategory();
                       if (e.key === "Escape") {
                         setIsAddingCategory(false);
                         setNewCategoryTitle("");
+                        setCategorySuggestions([]);
                       }
                     }}
                   />
@@ -205,6 +227,7 @@ function ParticipantColumn({
                     <Button size="sm" variant="ghost" onClick={() => {
                       setIsAddingCategory(false);
                       setNewCategoryTitle("");
+                      setCategorySuggestions([]);
                     }}>Cancel</Button>
                     <Button size="sm" onClick={handleCreateCategory} disabled={!newCategoryTitle.trim() || createCategory.isPending}>
                       {createCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
@@ -244,6 +267,7 @@ function CategoryCard({
 }) {
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemContent, setNewItemContent] = useState("");
+  const [itemSuggestions, setItemSuggestions] = useState<string[]>([]);
   const [editTitleOpen, setEditTitleOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(category.title);
   
@@ -253,21 +277,29 @@ function CategoryCard({
   const deleteItem = useDeleteItem();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { getSuggestions: getItemSuggest, invalidate: invalidateItemCache } = useItemSuggestions(category.id);
+
+  const existingContents: string[] = category.items.map((i) => i.content);
 
   const handleCreateItem = async () => {
-    if (!newItemContent.trim()) return;
+    const trimmed = newItemContent.trim();
+    if (!trimmed) return;
+    if (isDuplicate(trimmed, existingContents)) {
+      toast({ title: "Already exists", description: "This entry already exists in this category.", variant: "destructive" });
+      return;
+    }
     try {
-      await createItem.mutateAsync({
-        data: {
-          slot,
-          categoryId: category.id,
-          content: newItemContent.trim()
-        }
-      });
+      await createItem.mutateAsync({ data: { slot, categoryId: category.id, content: trimmed } });
+      invalidateItemCache();
       setNewItemContent("");
+      setItemSuggestions([]);
       setIsAddingItem(false);
       queryClient.invalidateQueries({ queryKey: getGetDayQueryKey(date) });
-    } catch (e) {}
+    } catch (e: any) {
+      if (e?.response?.status === 409) {
+        toast({ title: "Already exists", variant: "destructive" });
+      }
+    }
   };
 
   const handleUpdateTitle = async () => {
@@ -374,12 +406,21 @@ function CategoryCard({
             <div className="pt-2">
               {isAddingItem ? (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                  <Textarea 
+                  <AutocompleteInput
+                    multiline
                     autoFocus
-                    placeholder="Type here..." 
+                    placeholder="Type here..."
                     value={newItemContent}
-                    onChange={(e) => setNewItemContent(e.target.value)}
-                    className="min-h-[80px] text-sm resize-none bg-muted/20 border-border/50 focus-visible:ring-primary/30"
+                    onChange={(v) => {
+                      setNewItemContent(v);
+                      getItemSuggest(v, setItemSuggestions);
+                    }}
+                    suggestions={itemSuggestions}
+                    onSuggestionSelect={(v) => {
+                      setNewItemContent(v);
+                      setItemSuggestions([]);
+                    }}
+                    className="bg-muted/20 border-border/50 focus-visible:ring-primary/30"
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
@@ -388,6 +429,7 @@ function CategoryCard({
                       if (e.key === "Escape") {
                         setIsAddingItem(false);
                         setNewItemContent("");
+                        setItemSuggestions([]);
                       }
                     }}
                   />
@@ -395,6 +437,7 @@ function CategoryCard({
                     <Button size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={() => {
                       setIsAddingItem(false);
                       setNewItemContent("");
+                      setItemSuggestions([]);
                     }}>Cancel</Button>
                     <Button size="sm" className="h-8 px-3 text-xs" onClick={handleCreateItem} disabled={!newItemContent.trim() || createItem.isPending}>
                       {createItem.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save (Enter)'}

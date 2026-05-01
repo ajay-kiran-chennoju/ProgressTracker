@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, categoriesTable, itemsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import {
   CreateItemBody,
   UpdateItemBody,
@@ -33,6 +33,20 @@ router.post("/items", async (req, res) => {
   }
   if (cat.slot !== body.data.slot) {
     res.status(403).json({ error: "Cannot add to other participant's category" });
+    return;
+  }
+  const dupItem = await db
+    .select()
+    .from(itemsTable)
+    .where(
+      and(
+        eq(itemsTable.categoryId, body.data.categoryId),
+        sql`lower(${itemsTable.content}) = lower(${trimmed})`,
+      ),
+    )
+    .limit(1);
+  if (dupItem.length > 0) {
+    res.status(409).json({ error: "Already exists" });
     return;
   }
   const [row] = await db

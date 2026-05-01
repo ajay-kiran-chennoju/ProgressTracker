@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, categoriesTable, itemsTable } from "@workspace/db";
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, asc, sql, and } from "drizzle-orm";
 import {
   CreateCategoryBody,
   UpdateCategoryBody,
@@ -29,6 +29,21 @@ router.post("/categories", async (req, res) => {
   const trimmed = title.trim();
   if (!trimmed) {
     res.status(400).json({ error: "Title cannot be empty" });
+    return;
+  }
+  const existing = await db
+    .select()
+    .from(categoriesTable)
+    .where(
+      and(
+        eq(categoriesTable.slot, slot),
+        eq(categoriesTable.date, date),
+        sql`lower(${categoriesTable.title}) = lower(${trimmed})`,
+      ),
+    )
+    .limit(1);
+  if (existing.length > 0) {
+    res.status(409).json({ error: "Already exists" });
     return;
   }
   const [row] = await db
