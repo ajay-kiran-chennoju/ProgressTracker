@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Modal, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Modal, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2 } from 'lucide-react-native';
@@ -15,18 +15,34 @@ export default function DayScreen() {
   const [activeSlot, setActiveSlot] = useState<'A' | 'B'>(user?.slot || 'A');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>({ A: [], B: [] });
+  const [participants, setParticipants] = useState<any>({ A: null, B: null });
   
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [newCategoryTitle, setNewCategoryTitle] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [allCategoryTitles, setAllCategoryTitles] = useState<string[]>([]);
 
+  // Item Modal State
+  const [isAddItemModalVisible, setIsAddItemModalVisible] = useState(false);
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const [newItemContent, setNewItemContent] = useState('');
+  const [itemSuggestions, setItemSuggestions] = useState<string[]>([]);
+  const [allItemContents, setAllItemContents] = useState<string[]>([]);
+
   const fetchDayData = useCallback(async (selectedDate: string) => {
     setLoading(true);
     try {
       console.log(`[Day] Fetching data for date: ${selectedDate}`);
       
-      // 1. Fetch Items for the date (Requirement 3 logic)
+      // 0. Fetch Participants (Requirement 1)
+      const { data: partData } = await supabase.from('participants').select('slot, name');
+      const partMap: any = { A: null, B: null };
+      partData?.forEach(p => {
+        partMap[p.slot] = p;
+      });
+      setParticipants(partMap);
+
+      // 1. Fetch Items for the date
       const { data: itemData, error: itemError } = await supabase
         .from('items')
         .select('*')
@@ -37,8 +53,7 @@ export default function DayScreen() {
 
       const catIdsWithItems = Array.from(new Set(itemData?.map(i => i.category_id) || []));
 
-      // 2. Fetch Categories (Requirement 3 logic)
-      // Filter: category.date == selectedDate OR id IN catIdsWithItems
+      // 2. Fetch Categories
       let catQuery = supabase
         .from('categories')
         .select('*')
@@ -46,8 +61,6 @@ export default function DayScreen() {
 
       const { data: catData, error: catError } = await catQuery;
       if (catError) throw catError;
-
-      console.log(`[Day] Items count: ${itemData?.length || 0}, Categories count: ${catData?.length || 0}`);
 
       // 3. Map Items to Categories
       const itemsByCat = new Map();
@@ -58,7 +71,7 @@ export default function DayScreen() {
 
       const processedCats = catData?.map(cat => ({
         ...cat,
-        items: itemsByCat.get(cat.id) || []
+        items: Array.isArray(itemsByCat.get(cat.id)) ? itemsByCat.get(cat.id) : []
       })) || [];
 
       const grouped = {
@@ -67,14 +80,20 @@ export default function DayScreen() {
       };
       setData(grouped);
 
-      // 4. Fetch all unique category titles for suggestions
+      // 4. Fetch unique titles for suggestions
       const { data: allCats } = await supabase
         .from('categories')
         .select('title')
         .eq('slot', activeSlot);
-      
       const uniqueTitles = Array.from(new Set(allCats?.map(c => c.title) || []));
       setAllCategoryTitles(uniqueTitles);
+
+      // 5. Fetch all item contents for suggestions
+      const { data: allItems } = await supabase
+        .from('items')
+        .select('content');
+      const uniqueItemContents = Array.from(new Set(allItems?.map(i => i.content) || []));
+      setAllItemContents(uniqueItemContents);
 
     } catch (error) {
       console.error('Error fetching day data:', error);
@@ -96,7 +115,6 @@ export default function DayScreen() {
     const title = newCategoryTitle.trim();
     if (!title) return;
 
-    // Duplicate Check (case-insensitive)
     const exists = data[activeSlot].some((c: any) => c.title.toLowerCase() === title.toLowerCase());
     if (exists) {
       Alert.alert('Already exists', 'This category already exists for today.');
@@ -121,6 +139,30 @@ export default function DayScreen() {
       fetchDayData(date);
     } catch (error) {
       console.error('Error adding category:', error);
+    }
+  };
+
+  const handleAddItem = async () => {
+    const content = newItemContent.trim();
+    if (!content || !activeCategoryId) return;
+
+    try {
+      const { error } = await supabase
+        .from('items')
+        .insert([{
+          category_id: activeCategoryId,
+          content: content,
+          date: date
+        }]);
+
+      if (error) throw error;
+
+      setIsAddItemModalVisible(false);
+      setNewItemContent('');
+      setActiveCategoryId(null);
+      fetchDayData(date);
+    } catch (error) {
+      console.error('Error adding item:', error);
     }
   };
 
@@ -155,19 +197,34 @@ export default function DayScreen() {
         </Pressable>
       </View>
       <View style={styles.itemsList}>
-        {cat.items.length === 0 ? (
+        {(cat.items || []).length === 0 ? (
           <Text style={styles.noItemsText}>No entries yet</Text>
         ) : (
-          cat.items.slice(0, 3).map((item: any) => (
-            <Text key={item.id} style={styles.itemPreview} numberOfLines={1}>
-              • {item.content}
-            </Text>
-          ))
-        )}
-        {cat.items.length > 3 && (
-          <Text style={styles.moreItemsText}>+ {cat.items.length - 3} more</Text>
+          <ScrollView 
+            style={styles.itemsScroll} 
+            nestedScrollEnabled={true}
+            showsVerticalScrollIndicator={true}
+          >
+            {cat.items.map((item: any) => (
+              <Text key={item.id} style={styles.itemPreview}>
+                • {item.content}
+              </Text>
+            ))}
+          </ScrollView>
         )}
       </View>
+      {activeSlot === user?.slot && (
+        <Pressable 
+          style={styles.addItemInlineBtn}
+          onPress={() => {
+            setActiveCategoryId(cat.id);
+            setIsAddItemModalVisible(true);
+          }}
+        >
+          <Plus size={14} color="#007AFF" />
+          <Text style={styles.addItemInlineText}>Add entry</Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 
@@ -188,13 +245,17 @@ export default function DayScreen() {
           style={[styles.slotBtn, activeSlot === 'A' && styles.slotBtnActive]}
           onPress={() => setActiveSlot('A')}
         >
-          <Text style={[styles.slotBtnText, activeSlot === 'A' && styles.slotBtnTextActive]}>Participant A</Text>
+          <Text style={[styles.slotBtnText, activeSlot === 'A' && styles.slotBtnTextActive]}>
+            {participants.A?.name || 'Participant A'}
+          </Text>
         </Pressable>
         <Pressable 
           style={[styles.slotBtn, activeSlot === 'B' && styles.slotBtnActive]}
           onPress={() => setActiveSlot('B')}
         >
-          <Text style={[styles.slotBtnText, activeSlot === 'B' && styles.slotBtnTextActive]}>Participant B</Text>
+          <Text style={[styles.slotBtnText, activeSlot === 'B' && styles.slotBtnTextActive]}>
+            {participants.B?.name || 'Participant B'}
+          </Text>
         </Pressable>
       </View>
 
@@ -222,55 +283,100 @@ export default function DayScreen() {
         )}
       </ScrollView>
 
+      {/* Add Category Modal */}
       <Modal
         visible={isAddModalVisible}
         transparent={true}
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setIsAddModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add Category</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., Coding, Fitness, Reading"
-              value={newCategoryTitle}
-              onChangeText={(text) => {
-                setNewCategoryTitle(text);
-                const filtered = allCategoryTitles.filter(t => 
-                  t.toLowerCase().includes(text.toLowerCase()) && t.toLowerCase() !== text.toLowerCase()
-                );
-                setSuggestions(text ? filtered.slice(0, 5) : []);
-              }}
-              autoFocus
-            />
-            
-            {suggestions.length > 0 && (
-              <View style={styles.suggestionContainer}>
-                {suggestions.map((s, i) => (
-                  <Pressable 
-                    key={i} 
-                    style={styles.suggestionItem}
-                    onPress={() => {
-                      setNewCategoryTitle(s);
-                      setSuggestions([]);
-                    }}
-                  >
-                    <Text style={styles.suggestionText}>{s}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Add Category</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Coding, Fitness, Reading"
+                value={newCategoryTitle}
+                onChangeText={(text) => {
+                  setNewCategoryTitle(text);
+                  const filtered = allCategoryTitles.filter(t => 
+                    t.toLowerCase().includes(text.toLowerCase()) && t.toLowerCase() !== text.toLowerCase()
+                  );
+                  setSuggestions(text ? filtered.slice(0, 5) : []);
+                }}
+                autoFocus
+              />
+              
+              {suggestions.length > 0 && (
+                <View style={styles.suggestionContainer}>
+                  {suggestions.map((s, i) => (
+                    <Pressable key={i} style={styles.suggestionItem} onPress={() => {setNewCategoryTitle(s); setSuggestions([]);}}>
+                      <Text style={styles.suggestionText}>{s}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
 
-            <View style={styles.modalButtons}>
-              <Pressable style={styles.modalBtnCancel} onPress={() => setIsAddModalVisible(false)}>
-                <Text style={styles.modalBtnCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.modalBtnAdd} onPress={handleAddCategory}>
-                <Text style={styles.modalBtnAddText}>Add</Text>
-              </Pressable>
+              <View style={styles.modalButtons}>
+                <Pressable style={styles.modalBtnCancel} onPress={() => setIsAddModalVisible(false)}>
+                  <Text style={styles.modalBtnCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={styles.modalBtnAdd} onPress={handleAddCategory}>
+                  <Text style={styles.modalBtnAddText}>Add</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Add Item Modal */}
+      <Modal
+        visible={isAddItemModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsAddItemModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Add Entry</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="What did you achieve?"
+                value={newItemContent}
+                onChangeText={(text) => {
+                  setNewItemContent(text);
+                  const filtered = allItemContents.filter(c => 
+                    c.toLowerCase().includes(text.toLowerCase()) && c.toLowerCase() !== text.toLowerCase()
+                  );
+                  setItemSuggestions(text ? filtered.slice(0, 5) : []);
+                }}
+                autoFocus
+                multiline
+              />
+              
+              {itemSuggestions.length > 0 && (
+                <View style={styles.suggestionContainer}>
+                  {itemSuggestions.map((s, i) => (
+                    <Pressable key={i} style={styles.suggestionItem} onPress={() => {setNewItemContent(s); setItemSuggestions([]);}}>
+                      <Text style={styles.suggestionText}>{s}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.modalButtons}>
+                <Pressable style={styles.modalBtnCancel} onPress={() => {setIsAddItemModalVisible(false); setNewItemContent('');}}>
+                  <Text style={styles.modalBtnCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={styles.modalBtnAdd} onPress={handleAddItem}>
+                  <Text style={styles.modalBtnAddText}>Save</Text>
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </SafeAreaView>
@@ -353,6 +459,9 @@ const styles = StyleSheet.create({
   itemsList: {
     marginTop: 5,
   },
+  itemsScroll: {
+    maxHeight: 150,
+  },
   noItemsText: {
     fontStyle: 'italic',
     color: '#999',
@@ -361,12 +470,22 @@ const styles = StyleSheet.create({
   itemPreview: {
     fontSize: 14,
     color: '#444',
-    marginBottom: 4,
+    marginBottom: 6,
+    lineHeight: 20,
   },
-  moreItemsText: {
-    fontSize: 12,
+  addItemInlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F5F5F5',
+  },
+  addItemInlineText: {
+    marginLeft: 6,
     color: '#007AFF',
-    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '500',
   },
   addBtn: {
     flexDirection: 'row',
