@@ -4,10 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Flame, Folder, Settings, ChevronRight, LayoutList } from 'lucide-react-native';
+import { Calendar } from 'react-native-calendars';
 import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { RootStackParamList } from '../lib/types';
-import { format } from 'date-fns';
+import { format, subDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -17,61 +18,91 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
+  const [markedDates, setMarkedDates] = useState<any>({});
   const [stats, setStats] = useState({ currentStreak: 0, totalItems: 0 });
 
   const fetchData = useCallback(async () => {
     if (!user) return;
 
     try {
-      // Fetch unique categories for user
+      console.log(`[Home] Fetching data for slot: ${user.slot}`);
+      
+      // 1. Fetch ALL categories for the current participant (Requirement 2)
+      // Use 'slot' as per schema, though user said 'participant_id'
       const { data: catData, error: catError } = await supabase
         .from('categories')
-        .select('id, title')
-        .eq('slot', user.slot)
-        .order('title');
+        .select('*')
+        .eq('slot', user.slot);
 
       if (catError) throw catError;
+      console.log(`[Home] Categories count: ${catData?.length || 0}`);
 
-      // Unique categories by title
-      const uniqueCats = Array.from(new Set(catData.map(c => c.title.toLowerCase())))
-        .map(title => catData.find(c => c.title.toLowerCase() === title));
+      // 2. Fetch ALL items to calculate total items correctly
+      // We need to join with categories to filter by slot, but since we are doing 
+      // direct Supabase, we can fetch all items and filter in JS or use an inner join.
+      // Simplest: fetch items for the categories we just got.
+      const catIds = catData.map(c => c.id);
+      let itemCount = 0;
+      if (catIds.length > 0) {
+        const { count, error: itemError } = await supabase
+          .from('items')
+          .select('*', { count: 'exact', head: true })
+          .in('category_id', catIds);
+        if (!itemError) itemCount = count || 0;
+      }
+      console.log(`[Home] Total items count: ${itemCount}`);
 
+      // 3. Unique categories for the list (normalized by title)
+      const uniqueMap = new Map();
+      for (const c of catData) {
+        const norm = c.title.trim().toLowerCase();
+        if (!uniqueMap.has(norm)) {
+          uniqueMap.set(norm, c);
+        }
+      }
+      const uniqueCats = Array.from(uniqueMap.values()).sort((a, b) => a.title.localeCompare(b.title));
       setCategories(uniqueCats);
 
-      // Fetch items to calculate streak
-      const { data: itemData, error: itemError } = await supabase
-        .from('items')
-        .select('date')
-        .eq('date', format(new Date(), 'yyyy-MM-dd')) // Example: just getting some data
-        // In a real app, you'd fetch a larger range or use a stored procedure
-        
-      // For brevity, we'll just fetch total item count
-      const { count: itemCount } = await supabase
-        .from('items')
-        .select('*', { count: 'exact', head: true })
-        .eq('date', format(new Date(), 'yyyy-MM-dd')); // Should join with categories filter by slot
-
-      // Simplistic streak calc (logic from stats.ts)
-      const { data: allDatesData } = await supabase
-        .from('categories')
-        .select('date')
-        .eq('slot', user.slot);
-      
-      const dateSet = new Set(allDatesData?.map(d => d.date) || []);
+      // 4. Calculate Streak (Requirement 6)
+      const dateSet = new Set(catData.map(c => c.date));
       let streak = 0;
       const today = new Date();
       for (let i = 0; i < 365; i++) {
-        const d = new Date(today);
-        d.setDate(today.getDate() - i);
+        const d = subDays(today, i);
         const key = format(d, 'yyyy-MM-dd');
-        if (dateSet.has(key)) streak += 1;
-        else if (i === 0) continue;
-        else break;
+        if (dateSet.has(key)) {
+          streak += 1;
+        } else if (i === 0) {
+          // If today has no entry, the streak isn't broken yet
+          continue;
+        } else {
+          break;
+        }
       }
 
-      setStats({ currentStreak: streak, totalItems: catData.length }); // Simplified
+      setStats({ currentStreak: streak, totalItems: itemCount });
+
+      // 5. Prepare marked dates for Calendar (Requirement 5)
+      const marked: any = {};
+      dateSet.forEach(date => {
+        marked[date] = { 
+          marked: true, 
+          dotColor: '#007AFF', 
+          activeOpacity: 0 
+        };
+      });
+      // Highlight today
+      const todayStr = format(today, 'yyyy-MM-dd');
+      marked[todayStr] = {
+        ...marked[todayStr],
+        selected: true,
+        selectedColor: '#E5F1FF',
+        selectedTextColor: '#007AFF'
+      };
+      setMarkedDates(marked);
+
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching home data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -85,6 +116,10 @@ export default function HomeScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     fetchData();
+  };
+
+  const handleDayPress = (day: any) => {
+    navigation.navigate('Day', { date: day.dateString });
   };
 
   if (loading && !refreshing) {
@@ -127,10 +162,32 @@ export default function HomeScreen() {
               <LayoutList size={24} color="#007AFF" />
             </View>
             <View>
-              <Text style={styles.statValue}>{categories.length}</Text>
-              <Text style={styles.statLabel}>Categories</Text>
+              <Text style={styles.statValue}>{stats.totalItems}</Text>
+              <Text style={styles.statLabel}>Total Entries</Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Select a Day</Text>
+        </View>
+
+        <View style={styles.calendarCard}>
+          <Calendar
+            markedDates={markedDates}
+            onDayPress={handleDayPress}
+            theme={{
+              todayTextColor: '#007AFF',
+              arrowColor: '#007AFF',
+              indicatorColor: '#007AFF',
+              textDayFontWeight: '500',
+              textMonthFontWeight: 'bold',
+              textDayHeaderFontWeight: '500',
+              textDayFontSize: 14,
+              textMonthFontSize: 16,
+              textDayHeaderFontSize: 12,
+            }}
+          />
         </View>
 
         <View style={styles.sectionHeader}>
@@ -138,9 +195,9 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.categoryList}>
-          {categories.map((cat, index) => (
+          {uniqueCats.map((cat) => (
             <Pressable 
-              key={cat.id || index} 
+              key={cat.id} 
               style={styles.categoryItem}
               onPress={() => navigation.navigate('Category', { categoryId: cat.id, title: cat.title })}
             >
@@ -151,7 +208,7 @@ export default function HomeScreen() {
               <ChevronRight size={20} color="#CCC" />
             </Pressable>
           ))}
-          {categories.length === 0 && (
+          {uniqueCats.length === 0 && (
             <Text style={styles.emptyText}>No categories yet. Add one in the Day view!</Text>
           )}
         </View>
@@ -241,11 +298,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    marginTop: 8,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#1A1A1A',
+  },
+  calendarCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 10,
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
   categoryList: {
     backgroundColor: '#FFF',

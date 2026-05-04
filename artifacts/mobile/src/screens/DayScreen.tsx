@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Modal, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import { ChevronLeft, ChevronRight, Plus, FolderPlus, User, Trash2 } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2 } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { format, addDays, subDays, parseISO } from 'date-fns';
@@ -24,23 +24,50 @@ export default function DayScreen() {
   const fetchDayData = useCallback(async (selectedDate: string) => {
     setLoading(true);
     try {
-      const { data: catData, error } = await supabase
-        .from('categories')
-        .select(`
-          *,
-          items:items(*)
-        `)
-        .eq('date', selectedDate);
+      console.log(`[Day] Fetching data for date: ${selectedDate}`);
+      
+      // 1. Fetch Items for the date (Requirement 3 logic)
+      const { data: itemData, error: itemError } = await supabase
+        .from('items')
+        .select('*')
+        .eq('date', selectedDate)
+        .order('created_at', { ascending: true });
 
-      if (error) throw error;
+      if (itemError) throw itemError;
+
+      const catIdsWithItems = Array.from(new Set(itemData?.map(i => i.category_id) || []));
+
+      // 2. Fetch Categories (Requirement 3 logic)
+      // Filter: category.date == selectedDate OR id IN catIdsWithItems
+      let catQuery = supabase
+        .from('categories')
+        .select('*')
+        .or(`date.eq.${selectedDate}${catIdsWithItems.length > 0 ? `,id.in.(${catIdsWithItems.join(',')})` : ''}`);
+
+      const { data: catData, error: catError } = await catQuery;
+      if (catError) throw catError;
+
+      console.log(`[Day] Items count: ${itemData?.length || 0}, Categories count: ${catData?.length || 0}`);
+
+      // 3. Map Items to Categories
+      const itemsByCat = new Map();
+      itemData?.forEach(item => {
+        if (!itemsByCat.has(item.category_id)) itemsByCat.set(item.category_id, []);
+        itemsByCat.get(item.category_id).push(item);
+      });
+
+      const processedCats = catData?.map(cat => ({
+        ...cat,
+        items: itemsByCat.get(cat.id) || []
+      })) || [];
 
       const grouped = {
-        A: catData.filter(c => c.slot === 'A'),
-        B: catData.filter(c => c.slot === 'B')
+        A: processedCats.filter(c => c.slot === 'A'),
+        B: processedCats.filter(c => c.slot === 'B')
       };
       setData(grouped);
 
-      // Also fetch all unique category titles for suggestions
+      // 4. Fetch all unique category titles for suggestions
       const { data: allCats } = await supabase
         .from('categories')
         .select('title')
@@ -69,7 +96,7 @@ export default function DayScreen() {
     const title = newCategoryTitle.trim();
     if (!title) return;
 
-    // Duplicate Check
+    // Duplicate Check (case-insensitive)
     const exists = data[activeSlot].some((c: any) => c.title.toLowerCase() === title.toLowerCase());
     if (exists) {
       Alert.alert('Already exists', 'This category already exists for today.');
