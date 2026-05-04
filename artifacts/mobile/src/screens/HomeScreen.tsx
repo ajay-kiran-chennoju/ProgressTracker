@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -8,7 +8,7 @@ import { Calendar } from 'react-native-calendars';
 import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { RootStackParamList } from '../lib/types';
-import { format, subDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -21,27 +21,37 @@ export default function HomeScreen() {
   const [markedDates, setMarkedDates] = useState<any>({});
   const [stats, setStats] = useState({ currentStreak: 0, totalItems: 0 });
 
+  // Derived variable for unique categories (Requirement 1)
+  const uniqueCats = useMemo(() => {
+    if (!categories || !Array.isArray(categories)) return [];
+    const map = new Map();
+    categories.forEach((c) => {
+      if (c?.title) {
+        map.set(c.title.toLowerCase(), c);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
+  }, [categories]);
+
   const fetchData = useCallback(async () => {
     if (!user) return;
 
     try {
       console.log(`[Home] Fetching data for slot: ${user.slot}`);
       
-      // 1. Fetch ALL categories for the current participant (Requirement 2)
-      // Use 'slot' as per schema, though user said 'participant_id'
+      // 1. Fetch ALL categories for the current participant (Part 2: Safety)
       const { data: catData, error: catError } = await supabase
         .from('categories')
         .select('*')
         .eq('slot', user.slot);
 
       if (catError) throw catError;
-      console.log(`[Home] Categories count: ${catData?.length || 0}`);
+      
+      const safeData = Array.isArray(catData) ? catData : [];
+      setCategories(safeData);
 
       // 2. Fetch ALL items to calculate total items correctly
-      // We need to join with categories to filter by slot, but since we are doing 
-      // direct Supabase, we can fetch all items and filter in JS or use an inner join.
-      // Simplest: fetch items for the categories we just got.
-      const catIds = catData.map(c => c.id);
+      const catIds = safeData.map(c => c.id);
       let itemCount = 0;
       if (catIds.length > 0) {
         const { count, error: itemError } = await supabase
@@ -50,21 +60,9 @@ export default function HomeScreen() {
           .in('category_id', catIds);
         if (!itemError) itemCount = count || 0;
       }
-      console.log(`[Home] Total items count: ${itemCount}`);
 
-      // 3. Unique categories for the list (normalized by title)
-      const uniqueMap = new Map();
-      for (const c of catData) {
-        const norm = c.title.trim().toLowerCase();
-        if (!uniqueMap.has(norm)) {
-          uniqueMap.set(norm, c);
-        }
-      }
-      const uniqueCats = Array.from(uniqueMap.values()).sort((a, b) => a.title.localeCompare(b.title));
-      setCategories(uniqueCats);
-
-      // 4. Calculate Streak (Requirement 6)
-      const dateSet = new Set(catData.map(c => c.date));
+      // 4. Calculate Streak
+      const dateSet = new Set(safeData.map(c => c.date));
       let streak = 0;
       const today = new Date();
       for (let i = 0; i < 365; i++) {
@@ -73,7 +71,6 @@ export default function HomeScreen() {
         if (dateSet.has(key)) {
           streak += 1;
         } else if (i === 0) {
-          // If today has no entry, the streak isn't broken yet
           continue;
         } else {
           break;
@@ -82,7 +79,7 @@ export default function HomeScreen() {
 
       setStats({ currentStreak: streak, totalItems: itemCount });
 
-      // 5. Prepare marked dates for Calendar (Requirement 5)
+      // 5. Prepare marked dates for Calendar
       const marked: any = {};
       dateSet.forEach(date => {
         marked[date] = { 
@@ -91,7 +88,6 @@ export default function HomeScreen() {
           activeOpacity: 0 
         };
       });
-      // Highlight today
       const todayStr = format(today, 'yyyy-MM-dd');
       marked[todayStr] = {
         ...marked[todayStr],
@@ -103,6 +99,7 @@ export default function HomeScreen() {
 
     } catch (error) {
       console.error('Error fetching home data:', error);
+      setCategories([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -122,6 +119,14 @@ export default function HomeScreen() {
     navigation.navigate('Day', { date: day.dateString });
   };
 
+  if (!user) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text>Please log in</Text>
+      </View>
+    );
+  }
+
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
@@ -129,6 +134,8 @@ export default function HomeScreen() {
       </View>
     );
   }
+
+  const safeUniqueCats = uniqueCats || [];
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -195,7 +202,7 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.categoryList}>
-          {uniqueCats.map((cat) => (
+          {safeUniqueCats.map((cat) => (
             <Pressable 
               key={cat.id} 
               style={styles.categoryItem}
@@ -208,7 +215,7 @@ export default function HomeScreen() {
               <ChevronRight size={20} color="#CCC" />
             </Pressable>
           ))}
-          {uniqueCats.length === 0 && (
+          {safeUniqueCats.length === 0 && (
             <Text style={styles.emptyText}>No categories yet. Add one in the Day view!</Text>
           )}
         </View>
@@ -223,6 +230,7 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {
