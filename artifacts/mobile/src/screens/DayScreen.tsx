@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, memo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Modal, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
@@ -6,6 +6,49 @@ import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2 } from 'lucide-reac
 import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { format, addDays, subDays, parseISO } from 'date-fns';
+
+// Memoized Category Card to prevent unnecessary re-renders (Requirement 6)
+const CategoryCard = memo(({ cat, activeSlot, userSlot, onAddEntry, onDeleteCategory, onNavigate }: any) => {
+  return (
+    <Pressable 
+      style={styles.categoryCard}
+      onPress={() => onNavigate(cat.id, cat.title)}
+    >
+      <View style={styles.categoryHeader}>
+        <Text style={styles.categoryTitle}>{cat.title}</Text>
+        <Pressable onPress={() => onDeleteCategory(cat.id)}>
+          <Trash2 size={16} color="#FF3B30" opacity={0.6} />
+        </Pressable>
+      </View>
+      <View style={styles.itemsList}>
+        {(cat.items || []).length === 0 ? (
+          <Text style={styles.noItemsText}>No entries yet</Text>
+        ) : (
+          <ScrollView 
+            style={styles.itemsScroll} 
+            nestedScrollEnabled={true}
+            showsVerticalScrollIndicator={true}
+          >
+            {cat.items.map((item: any) => (
+              <Text key={item.id} style={styles.itemPreview}>
+                • {item.content}
+              </Text>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+      {activeSlot === userSlot && (
+        <Pressable 
+          style={styles.addItemInlineBtn}
+          onPress={() => onAddEntry(cat.id)}
+        >
+          <Plus size={14} color="#007AFF" />
+          <Text style={styles.addItemInlineText}>Add entry</Text>
+        </Pressable>
+      )}
+    </Pressable>
+  );
+});
 
 export default function DayScreen() {
   const route = useRoute<any>();
@@ -22,19 +65,17 @@ export default function DayScreen() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [allCategoryTitles, setAllCategoryTitles] = useState<string[]>([]);
 
-  // Item Modal State
+  // Item Modal State (Requirement 2: Global Modal)
   const [isAddItemModalVisible, setIsAddItemModalVisible] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [newItemContent, setNewItemContent] = useState('');
   const [itemSuggestions, setItemSuggestions] = useState<string[]>([]);
   const [allItemContents, setAllItemContents] = useState<string[]>([]);
 
-  const fetchDayData = useCallback(async (selectedDate: string) => {
-    setLoading(true);
+  const fetchDayData = useCallback(async (selectedDate: string, silent = false) => {
+    if (!silent) setLoading(true);
     try {
-      console.log(`[Day] Fetching data for date: ${selectedDate}`);
-      
-      // 0. Fetch Participants (Requirement 1)
+      // 0. Fetch Participants
       const { data: partData } = await supabase.from('participants').select('slot, name');
       const partMap: any = { A: null, B: null };
       partData?.forEach(p => {
@@ -98,7 +139,7 @@ export default function DayScreen() {
     } catch (error) {
       console.error('Error fetching day data:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [activeSlot]);
 
@@ -136,7 +177,12 @@ export default function DayScreen() {
 
       setIsAddModalVisible(false);
       setNewCategoryTitle('');
-      fetchDayData(date);
+      
+      // Optimistic update for category
+      setData((prev: any) => ({
+        ...prev,
+        [activeSlot]: [...prev[activeSlot], { ...newCat, items: [] }]
+      }));
     } catch (error) {
       console.error('Error adding category:', error);
     }
@@ -146,23 +192,54 @@ export default function DayScreen() {
     const content = newItemContent.trim();
     if (!content || !activeCategoryId) return;
 
+    // Optimistic Update (Requirement 5)
+    const tempId = Date.now().toString();
+    const optimisticItem = {
+      id: tempId,
+      category_id: activeCategoryId,
+      content: content,
+      date: date,
+      created_at: new Date().toISOString()
+    };
+
+    setData((prev: any) => ({
+      ...prev,
+      [activeSlot]: prev[activeSlot].map((cat: any) => 
+        cat.id === activeCategoryId 
+          ? { ...cat, items: [...(cat.items || []), optimisticItem] }
+          : cat
+      )
+    }));
+
+    setIsAddItemModalVisible(false);
+    setNewItemContent('');
+
     try {
-      const { error } = await supabase
+      const { data: insertedData, error } = await supabase
         .from('items')
         .insert([{
           category_id: activeCategoryId,
           content: content,
           date: date
-        }]);
+        }])
+        .select()
+        .single();
 
       if (error) throw error;
 
-      setIsAddItemModalVisible(false);
-      setNewItemContent('');
-      setActiveCategoryId(null);
-      fetchDayData(date);
+      // Replace temp item with real one
+      setData((prev: any) => ({
+        ...prev,
+        [activeSlot]: prev[activeSlot].map((cat: any) => 
+          cat.id === activeCategoryId 
+            ? { ...cat, items: cat.items.map((i: any) => i.id === tempId ? insertedData : i) }
+            : cat
+        )
+      }));
     } catch (error) {
       console.error('Error adding item:', error);
+      // Rollback on error
+      fetchDayData(date, true);
     }
   };
 
@@ -176,57 +253,31 @@ export default function DayScreen() {
           text: 'Delete', 
           style: 'destructive',
           onPress: async () => {
-            await supabase.from('categories').delete().eq('id', id);
-            fetchDayData(date);
+            // Optimistic update
+            setData((prev: any) => ({
+              ...prev,
+              [activeSlot]: prev[activeSlot].filter((c: any) => c.id !== id)
+            }));
+
+            const { error } = await supabase.from('categories').delete().eq('id', id);
+            if (error) {
+              console.error('Error deleting category:', error);
+              fetchDayData(date, true);
+            }
           }
         }
       ]
     );
   };
 
-  const renderCategory = (cat: any) => (
-    <Pressable 
-      key={cat.id} 
-      style={styles.categoryCard}
-      onPress={() => navigation.navigate('Category', { categoryId: cat.id, title: cat.title })}
-    >
-      <View style={styles.categoryHeader}>
-        <Text style={styles.categoryTitle}>{cat.title}</Text>
-        <Pressable onPress={() => handleDeleteCategory(cat.id)}>
-          <Trash2 size={16} color="#FF3B30" opacity={0.6} />
-        </Pressable>
-      </View>
-      <View style={styles.itemsList}>
-        {(cat.items || []).length === 0 ? (
-          <Text style={styles.noItemsText}>No entries yet</Text>
-        ) : (
-          <ScrollView 
-            style={styles.itemsScroll} 
-            nestedScrollEnabled={true}
-            showsVerticalScrollIndicator={true}
-          >
-            {cat.items.map((item: any) => (
-              <Text key={item.id} style={styles.itemPreview}>
-                • {item.content}
-              </Text>
-            ))}
-          </ScrollView>
-        )}
-      </View>
-      {activeSlot === user?.slot && (
-        <Pressable 
-          style={styles.addItemInlineBtn}
-          onPress={() => {
-            setActiveCategoryId(cat.id);
-            setIsAddItemModalVisible(true);
-          }}
-        >
-          <Plus size={14} color="#007AFF" />
-          <Text style={styles.addItemInlineText}>Add entry</Text>
-        </Pressable>
-      )}
-    </Pressable>
-  );
+  const openAddItemModal = useCallback((categoryId: string) => {
+    setActiveCategoryId(categoryId);
+    setIsAddItemModalVisible(true);
+  }, []);
+
+  const navigateToCategory = useCallback((id: string, title: string) => {
+    navigation.navigate('Category', { categoryId: id, title });
+  }, [navigation]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -264,7 +315,17 @@ export default function DayScreen() {
           <ActivityIndicator size="large" color="#000" style={{ marginTop: 40 }} />
         ) : (
           <>
-            {data[activeSlot].map(renderCategory)}
+            {data[activeSlot].map((cat: any) => (
+              <CategoryCard 
+                key={cat.id} 
+                cat={cat} 
+                activeSlot={activeSlot} 
+                userSlot={user?.slot}
+                onAddEntry={openAddItemModal}
+                onDeleteCategory={handleDeleteCategory}
+                onNavigate={navigateToCategory}
+              />
+            ))}
             
             {activeSlot === user?.slot && (
               <Pressable style={styles.addBtn} onPress={() => setIsAddModalVisible(true)}>
