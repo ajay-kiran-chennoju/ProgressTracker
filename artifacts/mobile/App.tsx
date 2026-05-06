@@ -9,6 +9,8 @@ import DayScreen from './src/screens/DayScreen';
 import CategoryScreen from './src/screens/CategoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
+import AddCategoryScreen from './src/screens/AddCategoryScreen';
+import AddEntryScreen from './src/screens/AddEntryScreen';
 import { RootStackParamList } from './src/lib/types';
 import { useCurrentUser } from './src/hooks/useCurrentUser';
 import { setupNotifications, scheduleDailyReminder } from './src/lib/notifications';
@@ -20,9 +22,7 @@ export default function App() {
 
   React.useEffect(() => {
     setupNotifications().then(granted => {
-      if (granted) {
-        scheduleDailyReminder();
-      }
+      if (granted) scheduleDailyReminder();
     });
   }, []);
 
@@ -33,21 +33,37 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        <Stack.Navigator 
+        <Stack.Navigator
           initialRouteName="Home"
           screenOptions={{
-            headerStyle: {
-              backgroundColor: '#fff',
-            },
-            headerTitleStyle: {
-              fontWeight: 'bold',
-            },
+            headerStyle: { backgroundColor: '#fff' },
+            headerTitleStyle: { fontWeight: 'bold' },
           }}
         >
           <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Progress Tracker' }} />
-          <Stack.Screen name="Day" component={DayScreen} options={({ route }) => ({ title: formatHeaderDate(route.params.date) })} />
-          <Stack.Screen name="Category" component={CategoryScreen} options={({ route }) => ({ title: route.params.title })} />
+          <Stack.Screen
+            name="Day"
+            component={DayScreen}
+            options={({ route }) => ({ title: formatHeaderDate(route.params.date) })}
+          />
+          <Stack.Screen
+            name="Category"
+            component={CategoryScreen}
+            options={({ route }) => ({ title: route.params.title })}
+          />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+
+          {/* Dedicated add screens — no modal flickering */}
+          <Stack.Screen
+            name="AddCategory"
+            component={AddCategoryScreen}
+            options={{ title: 'Add Category', presentation: 'card' }}
+          />
+          <Stack.Screen
+            name="AddEntry"
+            component={AddEntryScreen}
+            options={{ title: 'Add Entry', presentation: 'card' }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
       <StatusBar style="auto" />
@@ -57,8 +73,7 @@ export default function App() {
 
 function formatHeaderDate(dateStr: string) {
   try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   } catch {
     return dateStr;
   }

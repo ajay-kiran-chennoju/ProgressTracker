@@ -8,7 +8,7 @@ import { Calendar } from 'react-native-calendars';
 import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { RootStackParamList } from '../lib/types';
-import { format, subDays, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -17,112 +17,127 @@ export default function HomeScreen() {
   const { user } = useCurrentUser();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [markedDates, setMarkedDates] = useState<any>({});
-  const [stats, setStats] = useState({ currentStreak: 0, totalItems: 0 });
+  // Raw flat list of ALL categories for this participant (all dates)
+  const [allCategories, setAllCategories] = useState<any[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
 
-  // Derived variable for unique categories (Requirement 1)
-  const uniqueCats = useMemo(() => {
-    if (!categories || !Array.isArray(categories)) return [];
-    const map = new Map();
-    categories.forEach((c) => {
-      if (c?.title) {
-        map.set(c.title.toLowerCase(), c);
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
-  }, [categories]);
-
+  // ── Fetch ALL categories for this participant ───────────────────────────────
   const fetchData = useCallback(async () => {
     if (!user) return;
-
     try {
-      console.log(`[Home] Fetching data for slot: ${user.slot}`);
-      
-      // 1. Fetch ALL categories for the current participant (Part 2: Safety)
+      // 1. All categories (all dates) for current slot
       const { data: catData, error: catError } = await supabase
         .from('categories')
-        .select('*')
+        .select('id, title, date, slot')
         .eq('slot', user.slot);
 
       if (catError) throw catError;
-      
-      const safeData = Array.isArray(catData) ? catData : [];
-      setCategories(safeData);
 
-      // 2. Fetch ALL items to calculate total items correctly
+      const safeData = Array.isArray(catData) ? catData : [];
+      setAllCategories(safeData);
+
+      // 2. Item count
       const catIds = safeData.map(c => c.id);
-      let itemCount = 0;
       if (catIds.length > 0) {
         const { count, error: itemError } = await supabase
           .from('items')
           .select('*', { count: 'exact', head: true })
           .in('category_id', catIds);
-        if (!itemError) itemCount = count || 0;
+        if (!itemError) setTotalItems(count || 0);
+      } else {
+        setTotalItems(0);
       }
-
-      // 4. Calculate Streak
-      const dateSet = new Set(safeData.map(c => c.date));
-      let streak = 0;
-      const today = new Date();
-      for (let i = 0; i < 365; i++) {
-        const d = subDays(today, i);
-        const key = format(d, 'yyyy-MM-dd');
-        if (dateSet.has(key)) {
-          streak += 1;
-        } else if (i === 0) {
-          continue;
-        } else {
-          break;
-        }
-      }
-
-      setStats({ currentStreak: streak, totalItems: itemCount });
-
-      // 5. Prepare marked dates for Calendar
-      const marked: any = {};
-      dateSet.forEach(date => {
-        marked[date] = { 
-          marked: true, 
-          dotColor: '#007AFF', 
-          activeOpacity: 0 
-        };
-      });
-      const todayStr = format(today, 'yyyy-MM-dd');
-      marked[todayStr] = {
-        ...marked[todayStr],
-        selected: true,
-        selectedColor: '#E5F1FF',
-        selectedTextColor: '#007AFF'
-      };
-      setMarkedDates(marked);
-
-    } catch (error) {
-      console.error('Error fetching home data:', error);
-      setCategories([]);
+    } catch (err) {
+      console.error('Error fetching home data:', err);
+      setAllCategories([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchData();
-  };
+  const onRefresh = () => { setRefreshing(true); fetchData(); };
 
-  const handleDayPress = (day: any) => {
-    navigation.navigate('Day', { date: day.dateString });
-  };
+  // ── CALENDAR DOTS — normalize ALL category dates ───────────────────────────
+  // Root fix: build markedDates from ALL allCategories, not just today's.
+  const markedDates = useMemo(() => {
+    const marks: Record<string, any> = {};
 
+    allCategories.forEach(cat => {
+      if (!cat?.date) return;
+      // Normalize: Supabase returns date as 'YYYY-MM-DD' string (date column).
+      // Use the string directly to avoid timezone shifting.
+      const normalized = cat.date.slice(0, 10); // safe for both string and Date
+      marks[normalized] = {
+        marked: true,
+        dotColor: '#3B82F6',
+      };
+    });
+
+    // Highlight today
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    marks[todayStr] = {
+      ...marks[todayStr],
+      selected: true,
+      selectedColor: '#EFF6FF',
+      selectedTextColor: '#3B82F6',
+    };
+
+    return marks;
+  }, [allCategories]);
+
+  // ── STREAK — count consecutive days correctly ──────────────────────────────
+  const currentStreak = useMemo(() => {
+    if (!allCategories.length) return 0;
+
+    // Unique sorted dates descending
+    const uniqueDates = Array.from(
+      new Set(allCategories.map(c => c.date.slice(0, 10)))
+    ).sort((a, b) => b.localeCompare(a)); // descending lexicographic = descending date
+
+    if (!uniqueDates.length) return 0;
+
+    // Check if streak starts from today or yesterday (allow today with no entry yet)
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const mostRecent = uniqueDates[0];
+
+    // If most recent date is older than yesterday, streak is broken
+    const todayMs = new Date(todayStr).getTime();
+    const mostRecentMs = new Date(mostRecent).getTime();
+    const dayDiff = (todayMs - mostRecentMs) / (1000 * 60 * 60 * 24);
+    if (dayDiff > 1) return 0;
+
+    let streak = 1;
+    for (let i = 1; i < uniqueDates.length; i++) {
+      const prev = new Date(uniqueDates[i - 1]).getTime();
+      const curr = new Date(uniqueDates[i]).getTime();
+      const diff = (prev - curr) / (1000 * 60 * 60 * 24);
+      if (diff === 1) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [allCategories]);
+
+  // ── Unique category titles for the list ────────────────────────────────────
+  const uniqueCats = useMemo(() => {
+    if (!allCategories.length) return [];
+    const map = new Map<string, any>();
+    allCategories.forEach(c => {
+      if (c?.title) map.set(c.title.toLowerCase(), c);
+    });
+    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
+  }, [allCategories]);
+
+  // ─── Guards ────────────────────────────────────────────────────────────────
   if (!user) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>Please log in</Text>
+        <Text style={{ color: '#999' }}>Please log in</Text>
       </View>
     );
   }
@@ -130,22 +145,21 @@ export default function HomeScreen() {
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#000" />
+        <ActivityIndicator size="large" color="#3B82F6" />
       </View>
     );
   }
 
-  const safeUniqueCats = uniqueCats || [];
-
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Hello, {user?.name || 'User'}</Text>
+            <Text style={styles.greeting}>Hello, {user?.name || 'User'} 👋</Text>
             <Text style={styles.subtitle}>Track your progress today</Text>
           </View>
           <Pressable onPress={() => navigation.navigate('Settings')}>
@@ -153,40 +167,42 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
+        {/* Stats */}
         <View style={styles.statsCard}>
           <View style={styles.statItem}>
             <View style={styles.statIconContainer}>
               <Flame size={24} color="#FF9500" />
             </View>
             <View>
-              <Text style={styles.statValue}>{stats.currentStreak}</Text>
+              <Text style={styles.statValue}>{currentStreak}</Text>
               <Text style={styles.statLabel}>Day Streak</Text>
             </View>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <View style={[styles.statIconContainer, { backgroundColor: '#E5F1FF' }]}>
-              <LayoutList size={24} color="#007AFF" />
+            <View style={[styles.statIconContainer, { backgroundColor: '#EFF6FF' }]}>
+              <LayoutList size={24} color="#3B82F6" />
             </View>
             <View>
-              <Text style={styles.statValue}>{stats.totalItems}</Text>
+              <Text style={styles.statValue}>{totalItems}</Text>
               <Text style={styles.statLabel}>Total Entries</Text>
             </View>
           </View>
         </View>
 
+        {/* Calendar */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Select a Day</Text>
+          <Text style={styles.sectionTitle}>Activity Calendar</Text>
         </View>
-
         <View style={styles.calendarCard}>
           <Calendar
             markedDates={markedDates}
-            onDayPress={handleDayPress}
+            onDayPress={(day: any) => navigation.navigate('Day', { date: day.dateString })}
             theme={{
-              todayTextColor: '#007AFF',
-              arrowColor: '#007AFF',
-              indicatorColor: '#007AFF',
+              todayTextColor: '#3B82F6',
+              arrowColor: '#3B82F6',
+              dotColor: '#3B82F6',
+              selectedDotColor: '#3B82F6',
               textDayFontWeight: '500',
               textMonthFontWeight: 'bold',
               textDayHeaderFontWeight: '500',
@@ -197,30 +213,31 @@ export default function HomeScreen() {
           />
         </View>
 
+        {/* Category list */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Your Categories</Text>
         </View>
-
         <View style={styles.categoryList}>
-          {safeUniqueCats.map((cat) => (
-            <Pressable 
-              key={cat.id} 
+          {uniqueCats.map(cat => (
+            <Pressable
+              key={cat.id}
               style={styles.categoryItem}
               onPress={() => navigation.navigate('Category', { categoryId: cat.id, title: cat.title })}
             >
               <View style={styles.categoryInfo}>
-                <Folder size={20} color="#007AFF" style={styles.folderIcon} />
+                <Folder size={20} color="#3B82F6" style={styles.folderIcon} />
                 <Text style={styles.categoryTitle}>{cat.title}</Text>
               </View>
               <ChevronRight size={20} color="#CCC" />
             </Pressable>
           ))}
-          {safeUniqueCats.length === 0 && (
-            <Text style={styles.emptyText}>No categories yet. Add one in the Day view!</Text>
+          {uniqueCats.length === 0 && (
+            <Text style={styles.emptyText}>No categories yet. Tap below to add one!</Text>
           )}
         </View>
 
-        <Pressable 
+        {/* CTA */}
+        <Pressable
           style={styles.dayButton}
           onPress={() => navigation.navigate('Day', { date: format(new Date(), 'yyyy-MM-dd') })}
         >
@@ -231,36 +248,18 @@ export default function HomeScreen() {
   );
 }
 
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scrollContent: {
-    padding: 20,
-  },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scrollContent: { padding: 20 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 24,
   },
-  greeting: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
+  greeting: { fontSize: 24, fontWeight: 'bold', color: '#1A1A1A' },
+  subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
   statsCard: {
     flexDirection: 'row',
     backgroundColor: '#FFF',
@@ -273,11 +272,7 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 2,
   },
-  statItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  statItem: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   statIconContainer: {
     width: 44,
     height: 44,
@@ -287,20 +282,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-  },
-  statDivider: {
-    width: 1,
-    backgroundColor: '#EEE',
-    marginHorizontal: 15,
-  },
+  statValue: { fontSize: 20, fontWeight: 'bold', color: '#1A1A1A' },
+  statLabel: { fontSize: 12, color: '#666' },
+  statDivider: { width: 1, backgroundColor: '#EEE', marginHorizontal: 15 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -308,11 +292,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     marginTop: 8,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
-  },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' },
   calendarCard: {
     backgroundColor: '#FFF',
     borderRadius: 16,
@@ -343,35 +323,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
-  categoryInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  folderIcon: {
-    marginRight: 12,
-    opacity: 0.7,
-  },
-  categoryTitle: {
-    fontSize: 16,
-    color: '#1A1A1A',
-    fontWeight: '500',
-  },
-  emptyText: {
-    textAlign: 'center',
-    padding: 20,
-    color: '#999',
-    fontSize: 14,
-  },
+  categoryInfo: { flexDirection: 'row', alignItems: 'center' },
+  folderIcon: { marginRight: 12, opacity: 0.7 },
+  categoryTitle: { fontSize: 16, color: '#1A1A1A', fontWeight: '500' },
+  emptyText: { textAlign: 'center', padding: 20, color: '#999', fontSize: 14 },
   dayButton: {
-    backgroundColor: '#000',
+    backgroundColor: '#1A1A1A',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
     marginTop: 8,
   },
-  dayButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  dayButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 });
