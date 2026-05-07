@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2 } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
+import { safeDeleteCategory } from '../lib/dbSafeHelpers';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { format, addDays, parseISO } from 'date-fns';
 
@@ -69,22 +70,25 @@ export default function DayScreen() {
       partData?.forEach(p => { partMap[p.slot] = p; });
       setParticipants(partMap);
 
-      // Items for this date
+      // [SAFETY] Only fetch non-deleted items for this exact date
       const { data: itemData, error: itemError } = await supabase
         .from('items')
         .select('*')
         .eq('date', selectedDate)
+        .eq('is_deleted', false)          // ← exclude soft-deleted items
         .order('created_at', { ascending: true });
       if (itemError) throw itemError;
 
       const catIdsWithItems = Array.from(new Set(itemData?.map(i => i.category_id) || []));
 
-      // Categories for this date (or that have items on this date)
+      // [SAFETY] Only fetch non-deleted categories for this exact date
+      // Uses .or() to include categories created on this day OR that own items on this day
       const orFilter = `date.eq.${selectedDate}${catIdsWithItems.length > 0 ? `,id.in.(${catIdsWithItems.join(',')})` : ''}`;
       const { data: catData, error: catError } = await supabase
         .from('categories')
         .select('*')
-        .or(orFilter);
+        .or(orFilter)
+        .eq('is_deleted', false);         // ← exclude soft-deleted categories
       if (catError) throw catError;
 
       // Map items → categories
@@ -162,20 +166,24 @@ export default function DayScreen() {
   const handleDeleteCategory = useCallback((id: string) => {
     Alert.alert(
       'Delete Category',
-      'Delete this category and all its entries?',
+      'Delete this category and all its entries for this day?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            // Optimistic UI update — remove from local state immediately
             setData((prev: any) => ({
               ...prev,
               [activeSlot]: prev[activeSlot].filter((c: any) => c.id !== id)
             }));
-            const { error } = await supabase.from('categories').delete().eq('id', id);
-            if (error) {
-              console.error('Delete failed, re-fetching:', error);
+            try {
+              // [SAFETY] Soft delete by id only — does NOT affect other days or categories
+              await safeDeleteCategory(id, activeSlot);
+            } catch (error) {
+              console.error('[SAFE DELETE] failed, re-fetching:', error);
+              // Roll back optimistic update on failure
               fetchDayData(date);
             }
           }

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, categoriesTable, itemsTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import {
   CreateItemBody,
   UpdateItemBody,
@@ -22,7 +22,7 @@ router.get("/items/suggestions", async (req, res) => {
   const [cat] = await db
     .select()
     .from(categoriesTable)
-    .where(eq(categoriesTable.id, categoryId))
+    .where(and(eq(categoriesTable.id, categoryId as string), eq(categoriesTable.isDeleted, false)))
     .limit(1);
 
   if (!cat) {
@@ -35,7 +35,7 @@ router.get("/items/suggestions", async (req, res) => {
   const allSlotCats = await db
     .select({ id: categoriesTable.id, title: categoriesTable.title })
     .from(categoriesTable)
-    .where(eq(categoriesTable.slot, cat.slot));
+    .where(and(eq(categoriesTable.slot, cat.slot), eq(categoriesTable.isDeleted, false)));
     
   const matchingCatIds = allSlotCats
     .filter(c => c.title.trim().toLowerCase() === normTitle)
@@ -50,7 +50,10 @@ router.get("/items/suggestions", async (req, res) => {
   const items = await db
     .select({ content: itemsTable.content })
     .from(itemsTable)
-    .where(sql`${itemsTable.categoryId} IN (${sql.join(matchingCatIds.map(id => sql`${id}`), sql`, `)})`);
+    .where(and(
+      sql`${itemsTable.categoryId} IN (${sql.join(matchingCatIds.map(id => sql`${id}`), sql`, `)})`,
+      eq(itemsTable.isDeleted, false)
+    ));
     
   res.json(items.map(i => i.content));
 });
@@ -69,7 +72,7 @@ router.post("/items", async (req, res) => {
   const [cat] = await db
     .select()
     .from(categoriesTable)
-    .where(eq(categoriesTable.id, body.data.categoryId))
+    .where(and(eq(categoriesTable.id, body.data.categoryId), eq(categoriesTable.isDeleted, false)))
     .limit(1);
   if (!cat) {
     res.status(404).json({ error: "Category not found" });
@@ -111,7 +114,7 @@ router.patch("/items/:itemId", async (req, res) => {
   const [item] = await db
     .select()
     .from(itemsTable)
-    .where(eq(itemsTable.id, params.data.itemId))
+    .where(and(eq(itemsTable.id, params.data.itemId), eq(itemsTable.isDeleted, false)))
     .limit(1);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
@@ -120,7 +123,7 @@ router.patch("/items/:itemId", async (req, res) => {
   const [cat] = await db
     .select()
     .from(categoriesTable)
-    .where(eq(categoriesTable.id, item.categoryId))
+    .where(and(eq(categoriesTable.id, item.categoryId), eq(categoriesTable.isDeleted, false)))
     .limit(1);
   if (!cat || cat.slot !== body.data.slot) {
     res.status(403).json({ error: "Cannot edit other participant's item" });
@@ -153,7 +156,7 @@ router.delete("/items/:itemId", async (req, res) => {
   const [item] = await db
     .select()
     .from(itemsTable)
-    .where(eq(itemsTable.id, params.data.itemId))
+    .where(and(eq(itemsTable.id, params.data.itemId), eq(itemsTable.isDeleted, false)))
     .limit(1);
   if (!item) {
     res.status(204).end();
@@ -162,14 +165,28 @@ router.delete("/items/:itemId", async (req, res) => {
   const [cat] = await db
     .select()
     .from(categoriesTable)
-    .where(eq(categoriesTable.id, item.categoryId))
+    .where(and(eq(categoriesTable.id, item.categoryId), eq(categoriesTable.isDeleted, false)))
     .limit(1);
   if (!cat || cat.slot !== query.data.slot) {
     res.status(403).json({ error: "Cannot delete other participant's item" });
     return;
   }
-  await db.delete(itemsTable).where(eq(itemsTable.id, params.data.itemId));
+  await db.update(itemsTable).set({ isDeleted: true }).where(eq(itemsTable.id, params.data.itemId));
   res.status(204).end();
+});
+
+router.post("/items/:itemId/restore", async (req, res) => {
+  const params = DeleteItemParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  
+  await db.update(itemsTable)
+    .set({ isDeleted: false })
+    .where(eq(itemsTable.id, params.data.itemId));
+    
+  res.json({ success: true });
 });
 
 export default router;

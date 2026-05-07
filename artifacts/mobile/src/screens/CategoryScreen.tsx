@@ -4,6 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Trash2, Plus, Calendar, Clock } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
+import {
+  safeFetchItemsByCategoryId,
+  safeFetchItemContentSuggestions,
+  safeDeleteItem,
+} from '../lib/dbSafeHelpers';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { format, parseISO } from 'date-fns';
 
@@ -23,31 +28,21 @@ export default function CategoryScreen() {
   const fetchItems = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch items across ALL categories with the same title for this user
-      // Requirement 11: select items where title = selectedCategory and participant_id = currentUserId
-      
-      const { data: itemData, error } = await supabase
-        .from('items')
-        .select(`
-          *,
-          category:categories!inner(*)
-        `)
-        .eq('category.title', title)
-        .eq('category.slot', user?.slot)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
+      // [SAFETY FIX] Fetch items by exact categoryId (NOT by title).
+      // Old code used `.eq('category.title', title)` which would return items
+      // from ALL categories across ALL dates with the same name — a cross-day data leak.
+      const itemData = await safeFetchItemsByCategoryId(categoryId);
       setItems(itemData);
 
-      // Fetch all unique item contents for this category title to provide suggestions
-      const uniqueContents = Array.from(new Set(itemData.map(i => i.content)));
+      // Suggestions from this category only (id-scoped, non-deleted)
+      const uniqueContents = await safeFetchItemContentSuggestions(categoryId);
       setAllItemContents(uniqueContents);
     } catch (error) {
       console.error('Error fetching items:', error);
     } finally {
       setLoading(false);
     }
-  }, [title, user?.slot]);
+  }, [categoryId]);
 
   useEffect(() => {
     fetchItems();
@@ -92,12 +87,17 @@ export default function CategoryScreen() {
       'Are you sure you want to delete this entry?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
+        {
+          text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await supabase.from('items').delete().eq('id', id);
-            fetchItems();
+            try {
+              // [SAFETY] Soft delete by item id only — other items and categories are unaffected
+              await safeDeleteItem(id, user?.slot ?? '');
+              fetchItems();
+            } catch (error) {
+              console.error('[SAFE DELETE] item failed:', error);
+            }
           }
         }
       ]

@@ -1,4 +1,4 @@
-import { pgTable, varchar, text, timestamp, date, index } from "drizzle-orm/pg-core";
+import { pgTable, varchar, text, timestamp, date, index, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const categoriesTable = pgTable(
@@ -9,6 +9,7 @@ export const categoriesTable = pgTable(
     date: date("date").notNull(),
     title: text("title").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    isDeleted: boolean("is_deleted").default(false).notNull(),
   },
   (table) => ({
     bySlotDate: index("categories_slot_date_idx").on(table.slot, table.date),

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, categoriesTable, itemsTable } from "@workspace/db";
-import { eq, sql, desc } from "drizzle-orm";
+import { eq, sql, desc, and } from "drizzle-orm";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
 import { listAllParticipants, type Slot } from "../lib/participants";
 
@@ -10,19 +10,19 @@ async function summarizeSlot(slot: Slot) {
   const [cats] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(categoriesTable)
-    .where(eq(categoriesTable.slot, slot));
+    .where(and(eq(categoriesTable.slot, slot), eq(categoriesTable.isDeleted, false)));
 
   const [items] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(itemsTable)
     .innerJoin(categoriesTable, eq(itemsTable.categoryId, categoriesTable.id))
-    .where(eq(categoriesTable.slot, slot));
+    .where(and(eq(categoriesTable.slot, slot), eq(categoriesTable.isDeleted, false), eq(itemsTable.isDeleted, false)));
 
   const dayRows = await db
     .selectDistinct({ date: categoriesTable.date })
     .from(categoriesTable)
     .innerJoin(itemsTable, eq(itemsTable.categoryId, categoriesTable.id))
-    .where(eq(categoriesTable.slot, slot));
+    .where(and(eq(categoriesTable.slot, slot), eq(categoriesTable.isDeleted, false), eq(itemsTable.isDeleted, false)));
 
   const dates = dayRows
     .map((r) => (typeof r.date === "string" ? r.date : new Date(r.date).toISOString().slice(0, 10)))
@@ -58,7 +58,8 @@ router.get("/stats/summary", async (_req, res) => {
   const allDays = await db
     .selectDistinct({ date: categoriesTable.date })
     .from(categoriesTable)
-    .innerJoin(itemsTable, eq(itemsTable.categoryId, categoriesTable.id));
+    .innerJoin(itemsTable, eq(itemsTable.categoryId, categoriesTable.id))
+    .where(and(eq(categoriesTable.isDeleted, false), eq(itemsTable.isDeleted, false)));
 
   res.json({
     a: { participant: a, ...aSum },
@@ -90,6 +91,7 @@ router.get("/stats/recent-activity", async (req, res) => {
     })
     .from(itemsTable)
     .innerJoin(categoriesTable, eq(itemsTable.categoryId, categoriesTable.id))
+    .where(and(eq(categoriesTable.isDeleted, false), eq(itemsTable.isDeleted, false)))
     .orderBy(desc(itemsTable.createdAt))
     .limit(limit);
 

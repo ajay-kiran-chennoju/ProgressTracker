@@ -6,6 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Flame, Folder, Settings, ChevronRight, LayoutList } from 'lucide-react-native';
 import { Calendar } from 'react-native-calendars';
 import { supabase } from '../lib/supabase';
+import { safeFetchAllCategories, safeCountItemsByCategoryIds } from '../lib/dbSafeHelpers';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { RootStackParamList } from '../lib/types';
 import { format } from 'date-fns';
@@ -25,28 +26,15 @@ export default function HomeScreen() {
   const fetchData = useCallback(async () => {
     if (!user) return;
     try {
-      // 1. All categories (all dates) for current slot
-      const { data: catData, error: catError } = await supabase
-        .from('categories')
-        .select('id, title, date, slot')
-        .eq('slot', user.slot);
-
-      if (catError) throw catError;
-
-      const safeData = Array.isArray(catData) ? catData : [];
+      // [SAFETY] Fetch only non-deleted categories across all dates for this slot.
+      // Deleted categories must NOT appear in calendar dots, streak, or the category list.
+      const safeData = await safeFetchAllCategories(user.slot);
       setAllCategories(safeData);
 
-      // 2. Item count
-      const catIds = safeData.map(c => c.id);
-      if (catIds.length > 0) {
-        const { count, error: itemError } = await supabase
-          .from('items')
-          .select('*', { count: 'exact', head: true })
-          .in('category_id', catIds);
-        if (!itemError) setTotalItems(count || 0);
-      } else {
-        setTotalItems(0);
-      }
+      // [SAFETY] Count only non-deleted items that belong to non-deleted categories
+      const catIds = safeData.map((c: any) => c.id);
+      const count = await safeCountItemsByCategoryIds(catIds);
+      setTotalItems(count);
     } catch (err) {
       console.error('Error fetching home data:', err);
       setAllCategories([]);

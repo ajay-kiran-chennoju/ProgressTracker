@@ -4,6 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { ChevronLeft, Plus } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
+import {
+  safeFetchCategoryTitleSuggestions,
+  findExistingActiveCategory,
+} from '../lib/dbSafeHelpers';
 
 export default function AddCategoryScreen() {
   const route = useRoute<any>();
@@ -18,12 +22,8 @@ export default function AddCategoryScreen() {
   useEffect(() => {
     async function fetchAllCategories() {
       try {
-        const { data } = await supabase
-          .from('categories')
-          .select('title')
-          .eq('slot', slot);
-        
-        const uniqueTitles = Array.from(new Set(data?.map(c => c.title) || []));
+        // [SAFETY] Only fetch non-deleted category titles for suggestions
+        const uniqueTitles = await safeFetchCategoryTitleSuggestions(slot);
         setAllCategories(uniqueTitles);
       } catch (error) {
         console.error('Error fetching categories:', error);
@@ -48,23 +48,28 @@ export default function AddCategoryScreen() {
 
     setLoading(true);
     try {
+      // [SAFETY] Duplicate guard: check for an active category with the same title + date + slot
+      // before inserting, to prevent accidental duplicate rows.
+      const existing = await findExistingActiveCategory(trimmedTitle, date, slot);
+      if (existing) {
+        Alert.alert(
+          'Already exists',
+          `A "${trimmedTitle}" category already exists for this day. Tap it to add entries.`,
+        );
+        setLoading(false);
+        return;
+      }
+
       const { data: newCat, error } = await supabase
         .from('categories')
-        .insert([{
-          slot,
-          date,
-          title: trimmedTitle
-        }])
+        .insert([{ slot, date, title: trimmedTitle }])
         .select()
         .single();
 
       if (error) throw error;
 
       // Navigate back with the new category for optimistic update
-      navigation.navigate('Day', { 
-        date, 
-        newCategory: newCat 
-      });
+      navigation.navigate('Day', { date, newCategory: newCat });
     } catch (error: any) {
       console.error('Error adding category:', error);
       Alert.alert('Error', error.message || 'Could not add category');

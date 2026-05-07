@@ -19,7 +19,7 @@ router.get("/days/:date", async (req, res) => {
   const items = await db
     .select()
     .from(itemsTable)
-    .where(eq(itemsTable.date, date))
+    .where(and(eq(itemsTable.date, date), eq(itemsTable.isDeleted, false)))
     .orderBy(asc(itemsTable.createdAt));
 
   const catIdsWithItems = [...new Set(items.map((i) => i.categoryId))];
@@ -28,9 +28,12 @@ router.get("/days/:date", async (req, res) => {
     .select()
     .from(categoriesTable)
     .where(
-      or(
-        eq(categoriesTable.date, date),
-        catIdsWithItems.length > 0 ? inArray(categoriesTable.id, catIdsWithItems) : sql`false`
+      and(
+        or(
+          eq(categoriesTable.date, date),
+          catIdsWithItems.length > 0 ? inArray(categoriesTable.id, catIdsWithItems) : sql`false`
+        ),
+        eq(categoriesTable.isDeleted, false)
       )
     )
     .orderBy(asc(categoriesTable.createdAt));
@@ -99,7 +102,9 @@ router.get("/months/:year/:month/active-days", async (req, res) => {
     .where(
       and(
         sql`${itemsTable.date} >= ${start}`,
-        sql`${itemsTable.date} < ${end}`
+        sql`${itemsTable.date} < ${end}`,
+        eq(itemsTable.isDeleted, false),
+        eq(categoriesTable.isDeleted, false)
       )
     )
     .groupBy(itemsTable.date, categoriesTable.slot);
@@ -114,7 +119,8 @@ router.get("/months/:year/:month/active-days", async (req, res) => {
     .where(
       and(
         sql`${categoriesTable.date} >= ${start}`,
-        sql`${categoriesTable.date} < ${end}`
+        sql`${categoriesTable.date} < ${end}`,
+        eq(categoriesTable.isDeleted, false)
       )
     )
     .groupBy(categoriesTable.date, categoriesTable.slot);

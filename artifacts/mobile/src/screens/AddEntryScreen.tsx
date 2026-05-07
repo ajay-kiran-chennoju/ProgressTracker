@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
+import { safeFetchItemContentSuggestions } from '../lib/dbSafeHelpers';
 
 export default function AddEntryScreen() {
   const route = useRoute<any>();
@@ -17,11 +18,8 @@ export default function AddEntryScreen() {
   useEffect(() => {
     async function fetchExistingContents() {
       try {
-        const { data } = await supabase
-          .from('items')
-          .select('content')
-          .eq('category_id', categoryId);
-        const unique = Array.from(new Set(data?.map(i => i.content) || []));
+        // [SAFETY] Only suggest from non-deleted items in this exact category (id-scoped)
+        const unique = await safeFetchItemContentSuggestions(categoryId);
         setAllContents(unique);
       } catch (err) {
         console.error('Error fetching item suggestions:', err);

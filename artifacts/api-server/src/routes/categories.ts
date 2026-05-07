@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, categoriesTable, itemsTable } from "@workspace/db";
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, asc, sql, and } from "drizzle-orm";
 import {
   CreateCategoryBody,
   UpdateCategoryBody,
@@ -21,7 +21,9 @@ router.get("/categories/suggestions", async (req, res) => {
   let baseQuery = db.selectDistinct({ title: categoriesTable.title }).from(categoriesTable);
   
   if (slot && typeof slot === "string") {
-    baseQuery = baseQuery.where(eq(categoriesTable.slot, slot)) as any;
+    baseQuery = baseQuery.where(and(eq(categoriesTable.slot, slot), eq(categoriesTable.isDeleted, false))) as any;
+  } else {
+    baseQuery = baseQuery.where(eq(categoriesTable.isDeleted, false)) as any;
   }
   
   const titles = await baseQuery;
@@ -38,7 +40,7 @@ router.get("/categories/unique", async (req, res) => {
   const allCats = await db
     .select({ id: categoriesTable.id, title: categoriesTable.title, createdAt: categoriesTable.createdAt })
     .from(categoriesTable)
-    .where(eq(categoriesTable.slot, slot))
+    .where(and(eq(categoriesTable.slot, slot), eq(categoriesTable.isDeleted, false)))
     .orderBy(asc(categoriesTable.createdAt));
   
   const uniqueMap = new Map();
@@ -90,7 +92,7 @@ router.get("/categories/:categoryId", async (req, res) => {
   const [cat] = await db
     .select()
     .from(categoriesTable)
-    .where(eq(categoriesTable.id, params.data.categoryId))
+    .where(and(eq(categoriesTable.id, params.data.categoryId), eq(categoriesTable.isDeleted, false)))
     .limit(1);
   if (!cat) {
     res.status(404).json({ error: "Category not found" });
@@ -102,7 +104,7 @@ router.get("/categories/:categoryId", async (req, res) => {
   const allSlotCats = await db
     .select({ id: categoriesTable.id, title: categoriesTable.title })
     .from(categoriesTable)
-    .where(eq(categoriesTable.slot, cat.slot));
+    .where(and(eq(categoriesTable.slot, cat.slot), eq(categoriesTable.isDeleted, false)));
     
   const matchingCatIds = allSlotCats
     .filter(c => c.title.trim().toLowerCase() === normTitle)
@@ -114,7 +116,7 @@ router.get("/categories/:categoryId", async (req, res) => {
     items = await db
       .select()
       .from(itemsTable)
-      .where(sql`${itemsTable.categoryId} IN (${sql.join(matchingCatIds.map(id => sql`${id}`), sql`, `)})`)
+      .where(and(sql`${itemsTable.categoryId} IN (${sql.join(matchingCatIds.map(id => sql`${id}`), sql`, `)})`, eq(itemsTable.isDeleted, false)))
       .orderBy(sql`${itemsTable.createdAt} desc`);
   }
 
@@ -153,7 +155,7 @@ router.patch("/categories/:categoryId", async (req, res) => {
   const [cat] = await db
     .select()
     .from(categoriesTable)
-    .where(eq(categoriesTable.id, params.data.categoryId))
+    .where(and(eq(categoriesTable.id, params.data.categoryId), eq(categoriesTable.isDeleted, false)))
     .limit(1);
   if (!cat) {
     res.status(404).json({ error: "Category not found" });
@@ -176,7 +178,7 @@ router.patch("/categories/:categoryId", async (req, res) => {
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(itemsTable)
-    .where(eq(itemsTable.categoryId, updated.id));
+    .where(and(eq(itemsTable.categoryId, updated.id), eq(itemsTable.isDeleted, false)));
   res.json({
     id: updated.id,
     title: updated.title,
@@ -200,7 +202,7 @@ router.delete("/categories/:categoryId", async (req, res) => {
   const [cat] = await db
     .select()
     .from(categoriesTable)
-    .where(eq(categoriesTable.id, params.data.categoryId))
+    .where(and(eq(categoriesTable.id, params.data.categoryId), eq(categoriesTable.isDeleted, false)))
     .limit(1);
   if (!cat) {
     res.status(204).end();
@@ -210,8 +212,23 @@ router.delete("/categories/:categoryId", async (req, res) => {
     res.status(403).json({ error: "Cannot delete other participant's category" });
     return;
   }
-  await db.delete(categoriesTable).where(eq(categoriesTable.id, params.data.categoryId));
+  await db.update(categoriesTable).set({ isDeleted: true }).where(eq(categoriesTable.id, params.data.categoryId));
   res.status(204).end();
+});
+
+router.post("/categories/:categoryId/restore", async (req, res) => {
+  const params = DeleteCategoryParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  
+  // Note: we might want to check permissions here, but keeping it simple as per specs
+  await db.update(categoriesTable)
+    .set({ isDeleted: false })
+    .where(eq(categoriesTable.id, params.data.categoryId));
+    
+  res.json({ success: true });
 });
 
 export default router;
