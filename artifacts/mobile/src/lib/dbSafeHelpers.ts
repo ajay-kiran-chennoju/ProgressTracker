@@ -230,6 +230,38 @@ export async function safeCountItemsByCategoryIds(categoryIds: string[]): Promis
 }
 
 /**
+ * Fetch all unique dates that have active categories or items for a given slot.
+ * This is the root fix for Activity Calendar highlighting.
+ */
+export async function safeFetchActiveDates(slot: string): Promise<string[]> {
+  // 1. Get unique dates from categories
+  const { data: catDates, error: catErr } = await supabase
+    .from('categories')
+    .select('date')
+    .eq('slot', slot)
+    .eq('is_deleted', false);
+
+  if (catErr) throw catErr;
+
+  // 2. Get unique dates from items (need to join with categories to filter by slot)
+  const { data: itemDates, error: itemErr } = await supabase
+    .from('items')
+    .select('date, category:categories!inner(slot, is_deleted)')
+    .eq('category.slot', slot)
+    .eq('category.is_deleted', false)
+    .eq('is_deleted', false);
+
+  if (itemErr) throw itemErr;
+
+  // 3. Merge and deduplicate
+  const allDates = new Set<string>();
+  catDates?.forEach((c: any) => allDates.add(c.date.slice(0, 10)));
+  itemDates?.forEach((i: any) => allDates.add(i.date.slice(0, 10)));
+
+  return Array.from(allDates).sort();
+}
+
+/**
  * SAFE SOFT DELETE — marks an item as deleted by its unique `id`.
  *
  * Safety: targets exact row by id only — never by content or category title.

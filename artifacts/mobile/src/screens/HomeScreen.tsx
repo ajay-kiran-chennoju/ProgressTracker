@@ -6,7 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Flame, Folder, Settings, ChevronRight, LayoutList } from 'lucide-react-native';
 import { Calendar } from 'react-native-calendars';
 import { supabase } from '../lib/supabase';
-import { safeFetchAllCategories, safeCountItemsByCategoryIds } from '../lib/dbSafeHelpers';
+import { safeFetchAllCategories, safeCountItemsByCategoryIds, safeFetchActiveDates } from '../lib/dbSafeHelpers';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { RootStackParamList } from '../lib/types';
 import { format } from 'date-fns';
@@ -21,6 +21,7 @@ export default function HomeScreen() {
   // Raw flat list of ALL categories for this participant (all dates)
   const [allCategories, setAllCategories] = useState<any[]>([]);
   const [totalItems, setTotalItems] = useState(0);
+  const [activeDatesList, setActiveDatesList] = useState<string[]>([]);
 
   // ── Fetch ALL categories for this participant ───────────────────────────────
   const fetchData = useCallback(async () => {
@@ -35,6 +36,10 @@ export default function HomeScreen() {
       const catIds = safeData.map((c: any) => c.id);
       const count = await safeCountItemsByCategoryIds(catIds);
       setTotalItems(count);
+
+      // [FIX] Fetch all unique active dates (categories OR items) for calendar dots
+      const dates = await safeFetchActiveDates(user.slot);
+      setActiveDatesList(dates);
     } catch (err) {
       console.error('Error fetching home data:', err);
       setAllCategories([]);
@@ -48,17 +53,13 @@ export default function HomeScreen() {
 
   const onRefresh = () => { setRefreshing(true); fetchData(); };
 
-  // ── CALENDAR DOTS — normalize ALL category dates ───────────────────────────
-  // Root fix: build markedDates from ALL allCategories, not just today's.
+  // ── CALENDAR DOTS — highlight days with categories or items ───────────────
+  // Root fix: build markedDates from activeDatesList (covers both cats and items).
   const markedDates = useMemo(() => {
     const marks: Record<string, any> = {};
 
-    allCategories.forEach(cat => {
-      if (!cat?.date) return;
-      // Normalize: Supabase returns date as 'YYYY-MM-DD' string (date column).
-      // Use the string directly to avoid timezone shifting.
-      const normalized = cat.date.slice(0, 10); // safe for both string and Date
-      marks[normalized] = {
+    activeDatesList.forEach(dateStr => {
+      marks[dateStr] = {
         marked: true,
         dotColor: '#3B82F6',
       };
@@ -74,34 +75,37 @@ export default function HomeScreen() {
     };
 
     return marks;
-  }, [allCategories]);
+  }, [activeDatesList]);
 
   // ── STREAK — count consecutive days correctly ──────────────────────────────
   const currentStreak = useMemo(() => {
-    if (!allCategories.length) return 0;
+    if (!activeDatesList.length) return 0;
 
     // Unique sorted dates descending
-    const uniqueDates = Array.from(
-      new Set(allCategories.map(c => c.date.slice(0, 10)))
-    ).sort((a, b) => b.localeCompare(a)); // descending lexicographic = descending date
+    const uniqueDates = [...activeDatesList].sort((a, b) => b.localeCompare(a));
 
-    if (!uniqueDates.length) return 0;
+    const parseLocalDate = (dateStr: string) => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    };
 
-    // Check if streak starts from today or yesterday (allow today with no entry yet)
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const mostRecent = uniqueDates[0];
+    const today = parseLocalDate(todayStr);
+    const mostRecent = parseLocalDate(uniqueDates[0]);
+
+    // Difference in days (rounded to handle potential DST shifts)
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const daysSinceLast = Math.round((today.getTime() - mostRecent.getTime()) / msPerDay);
 
     // If most recent date is older than yesterday, streak is broken
-    const todayMs = new Date(todayStr).getTime();
-    const mostRecentMs = new Date(mostRecent).getTime();
-    const dayDiff = (todayMs - mostRecentMs) / (1000 * 60 * 60 * 24);
-    if (dayDiff > 1) return 0;
+    if (daysSinceLast > 1) return 0;
 
     let streak = 1;
     for (let i = 1; i < uniqueDates.length; i++) {
-      const prev = new Date(uniqueDates[i - 1]).getTime();
-      const curr = new Date(uniqueDates[i]).getTime();
-      const diff = (prev - curr) / (1000 * 60 * 60 * 24);
+      const d1 = parseLocalDate(uniqueDates[i - 1]);
+      const d2 = parseLocalDate(uniqueDates[i]);
+      const diff = Math.round((d1.getTime() - d2.getTime()) / msPerDay);
+
       if (diff === 1) {
         streak++;
       } else {
@@ -109,7 +113,7 @@ export default function HomeScreen() {
       }
     }
     return streak;
-  }, [allCategories]);
+  }, [activeDatesList]);
 
   // ── Unique category titles for the list ────────────────────────────────────
   const uniqueCats = useMemo(() => {
