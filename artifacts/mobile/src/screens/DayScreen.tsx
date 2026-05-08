@@ -103,9 +103,16 @@ export default function DayScreen() {
         items: itemsByCat.get(cat.id) || []
       })) || [];
 
-      setData({
-        A: processed.filter(c => c.slot === 'A'),
-        B: processed.filter(c => c.slot === 'B'),
+      setData((prev: any) => {
+        // Preserve any categories that were added in-session but aren't in the DB results yet
+        // (e.g. reused categories from other days that don't have items on this day yet)
+        const preserveA = prev.A.filter((pc: any) => !processed.some(c => c.id === pc.id));
+        const preserveB = prev.B.filter((pc: any) => !processed.some(c => c.id === pc.id));
+        
+        return {
+          A: [...processed.filter(c => c.slot === 'A'), ...preserveA],
+          B: [...processed.filter(c => c.slot === 'B'), ...preserveB],
+        };
       });
     } catch (err) {
       console.error('Error fetching day data:', err);
@@ -125,9 +132,10 @@ export default function DayScreen() {
       const params = route.params as any;
       if (!params) return;
 
-      // New category came back
+      // New category came back (reused or freshly created)
       if (params.newCategory) {
         const cat = params.newCategory;
+        setActiveSlot(cat.slot);
         setData((prev: any) => ({
           ...prev,
           [cat.slot]: prev[cat.slot].some((c: any) => c.id === cat.id)
