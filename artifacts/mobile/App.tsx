@@ -44,7 +44,7 @@ export default function App() {
           <Stack.Screen
             name="Day"
             component={DayScreen}
-            options={({ route }) => ({ title: formatHeaderDate(route.params.date) })}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="Category"
@@ -71,10 +71,4 @@ export default function App() {
   );
 }
 
-function formatHeaderDate(dateStr: string) {
-  try {
-    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  } catch {
-    return dateStr;
-  }
 }

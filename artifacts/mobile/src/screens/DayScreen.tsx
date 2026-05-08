@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, memo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
-import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2 } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2, Home } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { safeDeleteCategory } from '../lib/dbSafeHelpers';
 import { useCurrentUser } from '../hooks/useCurrentUser';
@@ -202,16 +202,24 @@ export default function DayScreen() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Date header */}
       <View style={styles.dateHeader}>
-        <Pressable onPress={() => changeDate(-1)} style={styles.dateNavBtn}>
-          <ChevronLeft size={24} color="#000" />
+        <Pressable onPress={() => navigation.navigate('Home')} style={styles.homeBtn}>
+          <Home size={22} color="#000" />
         </Pressable>
-        <Text style={styles.dateText}>{format(parseISO(date), 'EEEE, MMM d')}</Text>
-        <Pressable onPress={() => changeDate(1)} style={styles.dateNavBtn}>
-          <ChevronRight size={24} color="#000" />
-        </Pressable>
+
+        <View style={styles.dateNavigator}>
+          <Pressable onPress={() => changeDate(-1)} style={styles.dateNavBtn}>
+            <ChevronLeft size={20} color="#666" />
+          </Pressable>
+          <Text style={styles.dateText}>{format(parseISO(date), 'EEEE, MMM d')}</Text>
+          <Pressable onPress={() => changeDate(1)} style={styles.dateNavBtn}>
+            <ChevronRight size={20} color="#666" />
+          </Pressable>
+        </View>
+
+        <View style={{ width: 40 }} />
       </View>
 
       {/* Slot picker with real names */}
@@ -277,15 +285,31 @@ const styles = StyleSheet.create({
   dateHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: '#FFF',
     borderBottomWidth: 1,
     borderBottomColor: '#EEE',
   },
-  dateNavBtn: { padding: 5 },
-  dateText: { fontSize: 18, fontWeight: 'bold' },
+  homeBtn: {
+    padding: 8,
+    marginRight: 10,
+  },
+  dateNavigator: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateNavBtn: {
+    padding: 8,
+  },
+  dateText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginHorizontal: 10,
+    color: '#1A1A1A',
+  },
   slotPicker: {
     flexDirection: 'row',
     padding: 10,
