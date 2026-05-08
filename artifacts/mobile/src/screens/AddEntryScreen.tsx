@@ -54,23 +54,23 @@ export default function AddEntryScreen() {
       // Fetch existing items for this category to check for duplicates
       const { data: existingItems, error: fetchErr } = await supabase
         .from('items')
-        .select('content')
+        .select('*')
         .eq('category_id', categoryId)
         .eq('is_deleted', false);
 
       if (fetchErr) throw fetchErr;
 
-      const isDuplicate = existingItems?.some(
+      const matched = existingItems?.find(
         item => normalizeItemContent(item.content) === normalizedContent
       );
 
-      if (isDuplicate) {
-        Alert.alert(
-          'Item already exists',
-          'This entry already exists in this category.',
-          [{ text: 'OK' }]
-        );
-        setLoading(false);
+      if (matched) {
+        // Silent reuse — navigate back with the existing item
+        navigation.navigate('Day', {
+          date,
+          newItem: matched,
+          newItemCategoryId: categoryId,
+        });
         return;
       }
 

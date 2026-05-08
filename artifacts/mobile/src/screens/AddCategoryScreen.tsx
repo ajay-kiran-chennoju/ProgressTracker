@@ -74,11 +74,7 @@ export default function AddCategoryScreen() {
 
       if (matched) {
         // Reuse existing category — navigate back with it so DayScreen updates
-        Alert.alert(
-          'Already exists',
-          `"${matched.title}" already exists for this day.`,
-          [{ text: 'OK', onPress: () => navigation.navigate('Day', { date, newCategory: matched }) }],
-        );
+        navigation.navigate('Day', { date, newCategory: matched });
         return;
       }
 
