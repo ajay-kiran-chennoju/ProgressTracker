@@ -1,10 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { safeFetchItemContentSuggestions } from '../lib/dbSafeHelpers';
+
+// ─── Normalization helper ─────────────────────────────────────────────────────
+const normalizeItemContent = (t: string) => t.trim().toLowerCase();
 
 export default function AddEntryScreen() {
   const route = useRoute<any>();
@@ -30,9 +33,10 @@ export default function AddEntryScreen() {
 
   const suggestions = useMemo(() => {
     if (!content.trim()) return [];
+    const norm = normalizeItemContent(content);
     return allContents.filter(c =>
-      c.toLowerCase().includes(content.toLowerCase()) &&
-      c.toLowerCase() !== content.toLowerCase()
+      c.toLowerCase().includes(norm) &&
+      c.toLowerCase() !== norm
     ).slice(0, 5);
   }, [content, allContents]);
 
@@ -41,7 +45,35 @@ export default function AddEntryScreen() {
     if (!trimmedContent) return;
 
     setLoading(true);
+    Keyboard.dismiss();
+
     try {
+      const normalizedContent = normalizeItemContent(trimmedContent);
+
+      // ── Duplicate guard: avoid duplicate item in same category ──────────────
+      // Fetch existing items for this category to check for duplicates
+      const { data: existingItems, error: fetchErr } = await supabase
+        .from('items')
+        .select('content')
+        .eq('category_id', categoryId)
+        .eq('is_deleted', false);
+
+      if (fetchErr) throw fetchErr;
+
+      const isDuplicate = existingItems?.some(
+        item => normalizeItemContent(item.content) === normalizedContent
+      );
+
+      if (isDuplicate) {
+        Alert.alert(
+          'Item already exists',
+          'This entry already exists in this category.',
+          [{ text: 'OK' }]
+        );
+        setLoading(false);
+        return;
+      }
+
       const { data: newItem, error } = await supabase
         .from('items')
         .insert([{

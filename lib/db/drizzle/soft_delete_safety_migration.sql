@@ -33,7 +33,7 @@ UPDATE items       SET is_deleted = false WHERE is_deleted IS NULL;
 -- ────────────────────────────────────────────────────────────
 
 CREATE UNIQUE INDEX IF NOT EXISTS categories_unique_active_idx
-  ON categories (lower(title), date, slot)
+  ON categories (lower(title), slot)
   WHERE is_deleted = false;
 
 -- ────────────────────────────────────────────────────────────

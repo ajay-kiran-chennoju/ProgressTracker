@@ -1,13 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
+import {
+  View, Text, StyleSheet, TextInput, Pressable,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Keyboard,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import { ChevronLeft, Plus } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
-import {
-  safeFetchCategoryTitleSuggestions,
-  findExistingActiveCategory,
-} from '../lib/dbSafeHelpers';
+import { safeFetchCategoryTitleSuggestions } from '../lib/dbSafeHelpers';
+
+// ─── Normalization helper ─────────────────────────────────────────────────────
+const normalizeCategoryTitle = (t: string) => t.trim().toLowerCase();
 
 export default function AddCategoryScreen() {
   const route = useRoute<any>();
@@ -16,15 +19,15 @@ export default function AddCategoryScreen() {
 
   const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(false);
-  const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [allCategoryTitles, setAllCategoryTitles] = useState<string[]>([]);
   const [fetchingSuggestions, setFetchingSuggestions] = useState(true);
 
+  // ── Load existing titles for suggestions and duplicate checks ──────────────
   useEffect(() => {
     async function fetchAllCategories() {
       try {
-        // [SAFETY] Only fetch non-deleted category titles for suggestions
         const uniqueTitles = await safeFetchCategoryTitleSuggestions(slot);
-        setAllCategories(uniqueTitles);
+        setAllCategoryTitles(uniqueTitles);
       } catch (error) {
         console.error('Error fetching categories:', error);
       } finally {
@@ -34,41 +37,61 @@ export default function AddCategoryScreen() {
     fetchAllCategories();
   }, [slot]);
 
+  // ── Filtered suggestions ────────────────────────────────────────────────────
   const suggestions = useMemo(() => {
     if (!title.trim()) return [];
-    return allCategories.filter(t => 
-      t.toLowerCase().includes(title.toLowerCase()) && 
-      t.toLowerCase() !== title.toLowerCase()
-    ).slice(0, 5);
-  }, [title, allCategories]);
+    const norm = normalizeCategoryTitle(title);
+    return allCategoryTitles
+      .filter(t => t.toLowerCase().includes(norm) && t.toLowerCase() !== norm)
+      .slice(0, 5);
+  }, [title, allCategoryTitles]);
 
+  // ── Main handler ────────────────────────────────────────────────────────────
   const handleAdd = async () => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
 
     setLoading(true);
+    Keyboard.dismiss();
+
     try {
-      // [SAFETY] Duplicate guard: check for an active category with the same title + date + slot
-      // before inserting, to prevent accidental duplicate rows.
-      const existing = await findExistingActiveCategory(trimmedTitle, date, slot);
-      if (existing) {
+      const normalizedTitle = normalizeCategoryTitle(trimmedTitle);
+
+      // ── Slot-wide normalized duplicate check ──────────────────────────────
+      // Fetch ALL active categories for this slot (not just this date).
+      // A canonical category should be unique per (normalized title + date + slot).
+      const { data: existingSlotCats, error: fetchErr } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('slot', slot)
+        .eq('is_deleted', false);
+
+      if (fetchErr) throw fetchErr;
+
+      const matched = existingSlotCats?.find(
+        c => normalizeCategoryTitle(c.title) === normalizedTitle,
+      );
+
+      if (matched) {
+        // Reuse existing category — navigate back with it so DayScreen updates
         Alert.alert(
           'Already exists',
-          `A "${trimmedTitle}" category already exists for this day. Tap it to add entries.`,
+          `"${matched.title}" already exists for this day.`,
+          [{ text: 'OK', onPress: () => navigation.navigate('Day', { date, newCategory: matched }) }],
         );
-        setLoading(false);
         return;
       }
 
-      const { data: newCat, error } = await supabase
+      // ── Create new category ────────────────────────────────────────────────
+      const { data: newCat, error: insertErr } = await supabase
         .from('categories')
-        .insert([{ slot, date, title: trimmedTitle }])
+        .insert([{ slot, date, title: trimmedTitle, is_deleted: false }])
         .select()
         .single();
 
-      if (error) throw error;
+      if (insertErr) throw insertErr;
 
-      // Navigate back with the new category for optimistic update
+      // Pop this screen and pass the new category back to DayScreen
       navigation.navigate('Day', { date, newCategory: newCat });
     } catch (error: any) {
       console.error('Error adding category:', error);
@@ -88,7 +111,7 @@ export default function AddCategoryScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.content}
       >
@@ -100,6 +123,9 @@ export default function AddCategoryScreen() {
             value={title}
             onChangeText={setTitle}
             autoFocus
+            autoCapitalize="words"
+            returnKeyType="done"
+            onSubmitEditing={handleAdd}
           />
         </View>
 
@@ -107,8 +133,8 @@ export default function AddCategoryScreen() {
           <View style={styles.suggestionsList}>
             <Text style={styles.suggestionHeader}>Suggestions</Text>
             {suggestions.map((item, index) => (
-              <Pressable 
-                key={index} 
+              <Pressable
+                key={index}
                 style={styles.suggestionItem}
                 onPress={() => setTitle(item)}
               >
@@ -118,7 +144,7 @@ export default function AddCategoryScreen() {
           </View>
         )}
 
-        <Pressable 
+        <Pressable
           style={[styles.addBtn, (!title.trim() || loading) && styles.addBtnDisabled]}
           onPress={handleAdd}
           disabled={!title.trim() || loading}
@@ -135,10 +161,7 @@ export default function AddCategoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -149,27 +172,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#EEE',
   },
-  backBtn: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8,
-  },
+  backBtn: { padding: 8 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' },
+  content: { flex: 1, padding: 20 },
+  inputContainer: { marginBottom: 20 },
+  label: { fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 8 },
   input: {
     backgroundColor: '#FFF',
     borderWidth: 1,
@@ -201,10 +208,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#F5F5F5',
   },
-  suggestionText: {
-    fontSize: 15,
-    color: '#333',
-  },
+  suggestionText: { fontSize: 15, color: '#333' },
   addBtn: {
     backgroundColor: '#000',
     borderRadius: 12,
@@ -214,12 +218,6 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
     marginBottom: 20,
   },
-  addBtnDisabled: {
-    backgroundColor: '#CCC',
-  },
-  addBtnText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  addBtnDisabled: { backgroundColor: '#CCC' },
+  addBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 });
