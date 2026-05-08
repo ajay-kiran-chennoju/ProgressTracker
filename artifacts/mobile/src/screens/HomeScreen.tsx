@@ -22,6 +22,8 @@ export default function HomeScreen() {
   const [allCategories, setAllCategories] = useState<any[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [activeDatesList, setActiveDatesList] = useState<string[]>([]);
+  const [otherStreak, setOtherStreak] = useState(0);
+  const [otherName, setOtherName] = useState<string | null>(null);
 
   // ── Fetch ALL categories for this participant ───────────────────────────────
   const fetchData = useCallback(async () => {
@@ -40,6 +42,20 @@ export default function HomeScreen() {
       // [FIX] Fetch all unique active dates (categories OR items) for calendar dots
       const dates = await safeFetchActiveDates(user.slot);
       setActiveDatesList(dates);
+
+      // ── Other participant's streak ────────────────────────────────────────
+      const otherSlot = user.slot === 'A' ? 'B' : 'A';
+      const otherDates = await safeFetchActiveDates(otherSlot);
+      const computedOtherStreak = computeStreak(otherDates);
+      setOtherStreak(computedOtherStreak);
+
+      // Fetch other participant's name from Supabase
+      const { data: otherParts } = await supabase
+        .from('participants')
+        .select('name')
+        .eq('slot', otherSlot)
+        .single();
+      setOtherName(otherParts?.name ?? null);
     } catch (err) {
       console.error('Error fetching home data:', err);
       setAllCategories([]);
@@ -77,43 +93,29 @@ export default function HomeScreen() {
     return marks;
   }, [activeDatesList]);
 
-  // ── STREAK — count consecutive days correctly ──────────────────────────────
-  const currentStreak = useMemo(() => {
-    if (!activeDatesList.length) return 0;
-
-    // Unique sorted dates descending
-    const uniqueDates = [...activeDatesList].sort((a, b) => b.localeCompare(a));
-
-    const parseLocalDate = (dateStr: string) => {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      return new Date(year, month - 1, day);
+  // ── Shared streak computation ─────────────────────────────────────────────
+  const computeStreak = (dateList: string[]): number => {
+    if (!dateList.length) return 0;
+    const uniqueDates = [...dateList].sort((a, b) => b.localeCompare(a));
+    const parseLocalDate = (s: string) => {
+      const [y, m, d] = s.split('-').map(Number);
+      return new Date(y, m - 1, d);
     };
-
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const today = parseLocalDate(todayStr);
-    const mostRecent = parseLocalDate(uniqueDates[0]);
-
-    // Difference in days (rounded to handle potential DST shifts)
+    const today = parseLocalDate(format(new Date(), 'yyyy-MM-dd'));
     const msPerDay = 1000 * 60 * 60 * 24;
-    const daysSinceLast = Math.round((today.getTime() - mostRecent.getTime()) / msPerDay);
-
-    // If most recent date is older than yesterday, streak is broken
+    const daysSinceLast = Math.round((today.getTime() - parseLocalDate(uniqueDates[0]).getTime()) / msPerDay);
     if (daysSinceLast > 1) return 0;
-
     let streak = 1;
     for (let i = 1; i < uniqueDates.length; i++) {
-      const d1 = parseLocalDate(uniqueDates[i - 1]);
-      const d2 = parseLocalDate(uniqueDates[i]);
-      const diff = Math.round((d1.getTime() - d2.getTime()) / msPerDay);
-
-      if (diff === 1) {
-        streak++;
-      } else {
-        break;
-      }
+      const diff = Math.round((parseLocalDate(uniqueDates[i - 1]).getTime() - parseLocalDate(uniqueDates[i]).getTime()) / msPerDay);
+      if (diff === 1) streak++;
+      else break;
     }
     return streak;
-  }, [activeDatesList]);
+  };
+
+  // ── STREAK — count consecutive days correctly ──────────────────────────────
+  const currentStreak = useMemo(() => computeStreak(activeDatesList), [activeDatesList]);
 
   // ── Unique category titles for the list ────────────────────────────────────
   const uniqueCats = useMemo(() => {
@@ -166,8 +168,18 @@ export default function HomeScreen() {
               <Flame size={24} color="#FF9500" />
             </View>
             <View>
-              <Text style={styles.statValue}>{currentStreak}</Text>
-              <Text style={styles.statLabel}>Day Streak</Text>
+              <View style={styles.streakRow}>
+                <Text style={styles.statValue}>{currentStreak}</Text>
+                {currentStreak > 0 && currentStreak >= otherStreak && <Text style={styles.winEmoji}>😎</Text>}
+              </View>
+              <Text style={styles.statLabel}>Your Streak</Text>
+              {otherName && (
+                <View style={styles.otherStreakRow}>
+                  <Text style={styles.otherStreakValue}>{otherStreak}</Text>
+                  {otherStreak > currentStreak && <Text style={styles.otherWinEmoji}>😎</Text>}
+                  <Text style={styles.otherStreakLabel}> {otherName}'s streak</Text>
+                </View>
+              )}
             </View>
           </View>
           <View style={styles.statDivider} />
@@ -276,6 +288,12 @@ const styles = StyleSheet.create({
   },
   statValue: { fontSize: 20, fontWeight: 'bold', color: '#1A1A1A' },
   statLabel: { fontSize: 12, color: '#666' },
+  streakRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  winEmoji: { fontSize: 18, lineHeight: 26 },
+  otherStreakRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  otherStreakValue: { fontSize: 13, fontWeight: '700', color: '#555' },
+  otherWinEmoji: { fontSize: 13, marginLeft: 2 },
+  otherStreakLabel: { fontSize: 12, color: '#999', marginLeft: 1 },
   statDivider: { width: 1, backgroundColor: '#EEE', marginHorizontal: 15 },
   sectionHeader: {
     flexDirection: 'row',
