@@ -213,7 +213,7 @@ export default function DayScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Date header */}
       <View style={styles.dateHeader}>
-        <Pressable onPress={() => navigation.navigate('Home')} style={styles.homeBtn}>
+        <Pressable onPress={() => navigation.popToTop()} style={styles.homeBtn}>
           <Home size={22} color="#000" />
         </Pressable>
 
