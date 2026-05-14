@@ -44,9 +44,16 @@ const CategoryCard = memo(({
           ) : (
             <Square size={14} color={colors.border} style={{ marginTop: 4 }} />
           )}
-          <Text style={[cardStyles.itemPreview, { color: colors.textSecondary, fontStyle: 'italic', flex: 1 }]} numberOfLines={2}>
-            {task.content}
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[cardStyles.itemPreview, { color: colors.textSecondary, fontStyle: 'italic' }]} numberOfLines={2}>
+              {task.content}
+            </Text>
+            {task.carried_forward_from && (
+              <Text style={[cardStyles.fromBadge, { color: colors.primary }]}>
+                from {format(parseISO(task.carried_forward_from), 'MMM d')}
+              </Text>
+            )}
+          </View>
         </View>
       ))}
 
@@ -100,6 +107,7 @@ const cardStyles = StyleSheet.create({
   noItemsText: { fontStyle: 'italic', fontSize: 13 },
   taskPreviewRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   checkbox: { marginTop: 2 },
+  fromBadge: { fontSize: 10, fontWeight: '700', marginTop: -4, marginBottom: 4 },
   itemPreview: { fontSize: 14, marginBottom: 6, lineHeight: 20 },
   actionsRow: {
     flexDirection: 'row', alignItems: 'center',
@@ -129,6 +137,12 @@ export default function DayScreen() {
   const fetchDayData = useCallback(async (selectedDate: string) => {
     setLoading(true);
     try {
+      // Carry forward if it's today and the user is viewing their own slot
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      if (selectedDate === todayStr && activeSlot === user?.slot) {
+        await carryForwardIncompleteTasks(todayStr).catch(console.error);
+      }
+
       const { data: partData } = await supabase.from('participants').select('slot, name');
       const partMap: any = { A: null, B: null };
       partData?.forEach(p => { partMap[p.slot] = p; });
@@ -152,15 +166,6 @@ export default function DayScreen() {
         .order('created_at', { ascending: true });
       if (taskError) throw taskError;
 
-      // Carry forward if it's today and we didn't find many tasks? 
-      // Actually, taskHelpers.ts handles the logic to only do it once.
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
-      if (selectedDate === todayStr) {
-        await carryForwardIncompleteTasks(todayStr).catch(console.error);
-        // If we carried forward, we might want to re-fetch tasks?
-        // For simplicity, we just proceed. The next fetch or focus will pick them up.
-      }
-
       const catIdsWithItems = Array.from(new Set(itemData?.map(i => i.category_id) || []));
       const catIdsWithTasks = Array.from(new Set(taskData?.map(t => t.category_id) || []));
       const allActiveCatIds = Array.from(new Set([...catIdsWithItems, ...catIdsWithTasks]));
@@ -181,9 +186,20 @@ export default function DayScreen() {
       });
 
       const tasksByCat = new Map<string, any[]>();
+      const seenTasks = new Set<string>();
+
       taskData?.forEach(task => {
+        const contentKey = `${task.category_id}:::${task.content.trim().toLowerCase()}`;
+        if (seenTasks.has(contentKey)) return;
+
+        // SAFETY: If an item with the same content already exists today for this category, skip the task
+        const itemsToday = itemsByCat.get(task.category_id) || [];
+        const isAlreadyDone = itemsToday.some(i => i.content.trim().toLowerCase() === task.content.trim().toLowerCase());
+        if (isAlreadyDone) return;
+
         if (!tasksByCat.has(task.category_id)) tasksByCat.set(task.category_id, []);
         tasksByCat.get(task.category_id)!.push(task);
+        seenTasks.add(contentKey);
       });
 
       const processed = catData?.map(cat => ({
@@ -201,7 +217,7 @@ export default function DayScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeSlot, user?.slot]);
 
   useEffect(() => { fetchDayData(date); }, [date, fetchDayData]);
   useFocusEffect(useCallback(() => { fetchDayData(date); }, [date, fetchDayData]));

@@ -13,6 +13,9 @@
 import { supabase } from './supabase';
 import { format } from 'date-fns';
 
+// ─── Internal Lock ────────────────────────────────────────────────────────────
+let isCarryingForward = false;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SafeTask {
@@ -182,39 +185,58 @@ export async function completeTask(task: SafeTask): Promise<any> {
  * Called once on app load / day screen focus.
  */
 export async function carryForwardIncompleteTasks(today: string): Promise<void> {
-  // Find all incomplete tasks from before today
-  const { data: oldTasks, error: fetchErr } = await supabase
-    .from('tasks')
-    .select('*')
-    .lt('task_date', today)
-    .eq('completed', false)
-    .eq('is_deleted', false);
+  if (isCarryingForward) return;
+  isCarryingForward = true;
+  try {
+    // 1. Find all incomplete tasks from before today
+    const { data: oldTasks, error: fetchErr } = await supabase
+      .from('tasks')
+      .select('*')
+      .lt('task_date', today)
+      .eq('completed', false)
+      .eq('is_deleted', false)
+      .order('task_date', { ascending: false }); // Most recent first
 
-  if (fetchErr) throw fetchErr;
-  if (!oldTasks || oldTasks.length === 0) return;
+    if (fetchErr) throw fetchErr;
+    if (!oldTasks || oldTasks.length === 0) return;
 
-  // Fetch today's existing pending tasks to prevent duplicates
-  const { data: todayTasks, error: todayErr } = await supabase
-    .from('tasks')
-    .select('content, category_id')
-    .eq('task_date', today)
-    .eq('completed', false)
-    .eq('is_deleted', false);
+    // 2. Fetch today's existing pending tasks to prevent duplicates
+    const { data: todayTasks, error: todayErr } = await supabase
+      .from('tasks')
+      .select('content, category_id')
+      .eq('task_date', today)
+      .eq('completed', false)
+      .eq('is_deleted', false);
 
-  if (todayErr) throw todayErr;
+    if (todayErr) throw todayErr;
 
-  const todaySet = new Set(
-    (todayTasks ?? []).map(
-      (t) => `${t.category_id}:::${normalizeContent(t.content)}`,
-    ),
-  );
+    // 3. Fetch today's existing items (safety check: if it's already an item today, don't carry the task)
+    const { data: todayItems } = await supabase
+      .from('items')
+      .select('content, category_id')
+      .eq('date', today)
+      .eq('is_deleted', false);
 
-  const toInsert = oldTasks
-    .filter((t) => {
+    const todaySet = new Set(
+      (todayTasks ?? []).map(
+        (t) => `${t.category_id}:::${normalizeContent(t.content)}`,
+      ),
+    );
+
+    (todayItems ?? []).forEach((i) => {
+      todaySet.add(`${i.category_id}:::${normalizeContent(i.content)}`);
+    });
+
+    // 4. Filter unique old tasks to carry forward
+    const uniqueToCarry = new Map<string, any>();
+    oldTasks.forEach((t) => {
       const key = `${t.category_id}:::${normalizeContent(t.content)}`;
-      return !todaySet.has(key);
-    })
-    .map((t) => ({
+      if (!todaySet.has(key) && !uniqueToCarry.has(key)) {
+        uniqueToCarry.set(key, t);
+      }
+    });
+
+    const toInsert = Array.from(uniqueToCarry.values()).map((t) => ({
       category_id: t.category_id,
       slot: t.slot,
       content: t.content,
@@ -224,12 +246,15 @@ export async function carryForwardIncompleteTasks(today: string): Promise<void> 
       is_deleted: false,
     }));
 
-  if (toInsert.length === 0) return;
+    if (toInsert.length === 0) return;
 
-  const { error: insertErr } = await supabase.from('tasks').insert(toInsert);
-  if (insertErr) throw insertErr;
+    const { error: insertErr } = await supabase.from('tasks').insert(toInsert);
+    if (insertErr) throw insertErr;
 
-  console.log(`[CARRY-FORWARD] Carried ${toInsert.length} tasks to ${today}`);
+    console.log(`[CARRY-FORWARD] Carried ${toInsert.length} tasks to ${today}`);
+  } finally {
+    isCarryingForward = false;
+  }
 }
 
 // ─── SOFT DELETE ──────────────────────────────────────────────────────────────
