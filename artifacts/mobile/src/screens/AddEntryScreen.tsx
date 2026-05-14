@@ -1,127 +1,110 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Keyboard } from 'react-native';
+import {
+  View, Text, StyleSheet, TextInput, Pressable,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Keyboard,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { safeFetchItemContentSuggestions } from '../lib/dbSafeHelpers';
+import { invokeNavCallback } from '../lib/navigationCallbacks';
+import { useTheme } from '../lib/theme';
 
-// ─── Normalization helper ─────────────────────────────────────────────────────
-const normalizeItemContent = (t: string) => t.trim().toLowerCase();
+const normalizeContent = (t: string) => t.trim().toLowerCase();
 
 export default function AddEntryScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
-  const { categoryId, categoryTitle, date } = route.params;
+  const { colors } = useTheme();
+  const { categoryId, categoryTitle, date, callbackKey } = route.params;
 
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [allContents, setAllContents] = useState<string[]>([]);
 
   useEffect(() => {
-    async function fetchExistingContents() {
-      try {
-        // [SAFETY] Only suggest from non-deleted items in this exact category (id-scoped)
-        const unique = await safeFetchItemContentSuggestions(categoryId);
-        setAllContents(unique);
-      } catch (err) {
-        console.error('Error fetching item suggestions:', err);
-      }
-    }
-    fetchExistingContents();
+    safeFetchItemContentSuggestions(categoryId)
+      .then(setAllContents)
+      .catch(err => console.error('Error fetching suggestions:', err));
   }, [categoryId]);
 
   const suggestions = useMemo(() => {
     if (!content.trim()) return [];
-    const norm = normalizeItemContent(content);
-    return allContents.filter(c =>
-      c.toLowerCase().includes(norm) &&
-      c.toLowerCase() !== norm
-    ).slice(0, 5);
+    const norm = normalizeContent(content);
+    return allContents
+      .filter(c => c.toLowerCase().includes(norm) && c.toLowerCase() !== norm)
+      .slice(0, 5);
   }, [content, allContents]);
 
   const handleAdd = async () => {
-    const trimmedContent = content.trim();
-    if (!trimmedContent) return;
+    const trimmed = content.trim();
+    if (!trimmed) return;
 
     setLoading(true);
     Keyboard.dismiss();
 
     try {
-      const normalizedContent = normalizeItemContent(trimmedContent);
+      const normalized = normalizeContent(trimmed);
 
-      // ── Duplicate guard: avoid duplicate item in same category ──────────────
-      // Fetch existing items for this category to check for duplicates
-      const { data: existingItems, error: fetchErr } = await supabase
+      // Duplicate guard
+      const { data: existing, error: fetchErr } = await supabase
         .from('items')
         .select('*')
         .eq('category_id', categoryId)
         .eq('is_deleted', false);
-
       if (fetchErr) throw fetchErr;
 
-      const matched = existingItems?.find(
-        item => normalizeItemContent(item.content) === normalizedContent
+      const matched = existing?.find(
+        item => normalizeContent(item.content) === normalized,
       );
 
-      if (matched) {
-        // Silent reuse — navigate back with the existing item
-        navigation.navigate('Day', {
-          date,
-          newItem: matched,
-          newItemCategoryId: categoryId,
-        });
-        return;
-      }
+      const resultItem = matched ?? await (async () => {
+        const { data, error } = await supabase
+          .from('items')
+          .insert([{ category_id: categoryId, content: trimmed, date }])
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      })();
 
-      const { data: newItem, error } = await supabase
-        .from('items')
-        .insert([{
-          category_id: categoryId,
-          content: trimmedContent,
-          date,
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Navigate back passing the new item for optimistic update
-      navigation.navigate('Day', {
-        date,
-        newItem: newItem,
-        newItemCategoryId: categoryId,
-      });
-    } catch (error: any) {
-      console.error('Error adding entry:', error);
-      Alert.alert('Error', error.message || 'Could not add entry');
+      // Fire callback → caller updates its own state optimistically
+      invokeNavCallback(callbackKey, resultItem, categoryId);
+      navigation.goBack();
+    } catch (err: any) {
+      console.error('Error adding entry:', err);
+      Alert.alert('Error', err.message || 'Could not add entry');
     } finally {
       setLoading(false);
     }
   };
 
+  const s = mkStyles(colors);
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <ChevronLeft size={24} color="#000" />
+    <SafeAreaView style={s.container}>
+      <View style={s.header}>
+        <Pressable onPress={() => navigation.goBack()} style={s.backBtn}>
+          <ChevronLeft size={24} color={colors.text} />
         </Pressable>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Add Entry</Text>
-          <Text style={styles.headerSubtitle}>{categoryTitle}</Text>
+        <View style={s.headerTitleContainer}>
+          <Text style={s.headerTitle}>Add Entry</Text>
+          <Text style={s.headerSubtitle}>{categoryTitle}</Text>
         </View>
         <View style={{ width: 40 }} />
       </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.content}
+        style={s.content}
       >
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>What did you achieve?</Text>
+        <View style={s.inputContainer}>
+          <Text style={s.label}>What did you achieve?</Text>
           <TextInput
-            style={[styles.input, styles.multilineInput]}
+            style={[s.input, s.multilineInput]}
             placeholder="Describe your progress..."
+            placeholderTextColor={colors.textSecondary}
             value={content}
             onChangeText={setContent}
             autoFocus
@@ -132,134 +115,63 @@ export default function AddEntryScreen() {
         </View>
 
         {suggestions.length > 0 && (
-          <View style={styles.suggestionsList}>
-            <Text style={styles.suggestionHeader}>Previous entries</Text>
-            {suggestions.map((item, index) => (
-              <Pressable
-                key={index}
-                style={styles.suggestionItem}
-                onPress={() => setContent(item)}
-              >
-                <Text style={styles.suggestionText}>{item}</Text>
+          <View style={s.suggestionsList}>
+            <Text style={s.suggestionHeader}>Previous entries</Text>
+            {suggestions.map((item, i) => (
+              <Pressable key={i} style={s.suggestionItem} onPress={() => setContent(item)}>
+                <Text style={s.suggestionText}>{item}</Text>
               </Pressable>
             ))}
           </View>
         )}
 
         <Pressable
-          style={[styles.addBtn, (!content.trim() || loading) && styles.addBtnDisabled]}
+          style={[s.addBtn, (!content.trim() || loading) && s.addBtnDisabled]}
           onPress={handleAdd}
           disabled={!content.trim() || loading}
         >
-          {loading ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.addBtnText}>Save Entry</Text>
-          )}
+          {loading
+            ? <ActivityIndicator color="#FFF" />
+            : <Text style={s.addBtnText}>Save Entry</Text>}
         </Pressable>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
+const mkStyles = (colors: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  backBtn: {
-    padding: 8,
-  },
-  headerTitleContainer: {
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: '#007AFF',
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8,
-  },
+  backBtn: { padding: 8 },
+  headerTitleContainer: { alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text },
+  headerSubtitle: { fontSize: 12, color: colors.primary, fontWeight: '500', marginTop: 2 },
+  content: { flex: 1, padding: 20 },
+  inputContainer: { marginBottom: 20 },
+  label: { fontSize: 14, fontWeight: '600', color: colors.textSecondary, marginBottom: 8 },
   input: {
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#1A1A1A',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 12, padding: 16, fontSize: 16, color: colors.text,
   },
-  multilineInput: {
-    minHeight: 120,
-  },
+  multilineInput: { minHeight: 120 },
   suggestionsList: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#EEE',
-    marginBottom: 20,
-    overflow: 'hidden',
+    backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1,
+    borderColor: colors.border, marginBottom: 20, overflow: 'hidden',
   },
   suggestionHeader: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#999',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    textTransform: 'uppercase',
+    fontSize: 12, fontWeight: 'bold', color: colors.textSecondary,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, textTransform: 'uppercase',
   },
-  suggestionItem: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#F5F5F5',
-  },
-  suggestionText: {
-    fontSize: 15,
-    color: '#333',
-  },
+  suggestionItem: { padding: 16, borderTopWidth: 1, borderTopColor: colors.border },
+  suggestionText: { fontSize: 15, color: colors.text },
   addBtn: {
-    backgroundColor: '#000',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 'auto',
-    marginBottom: 20,
+    backgroundColor: colors.primary, borderRadius: 12, padding: 16,
+    alignItems: 'center', justifyContent: 'center', marginTop: 'auto', marginBottom: 20,
   },
-  addBtnDisabled: {
-    backgroundColor: '#CCC',
-  },
-  addBtnText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  addBtnDisabled: { backgroundColor: colors.border },
+  addBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 });

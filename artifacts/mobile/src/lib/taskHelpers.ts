@@ -154,7 +154,8 @@ export async function completeTask(task: SafeTask): Promise<any> {
 
   if (alreadyExists) return alreadyExists;
 
-  // 3. Create the normal item entry
+  // 3. Create the normal item entry.
+  // items table only has: category_id, content, date (is_deleted defaults false).
   const { data: newItem, error: itemErr } = await supabase
     .from('items')
     .insert([
@@ -162,8 +163,6 @@ export async function completeTask(task: SafeTask): Promise<any> {
         category_id: task.category_id,
         content: task.content,
         date: today,
-        slot: task.slot,
-        is_deleted: false,
       },
     ])
     .select()

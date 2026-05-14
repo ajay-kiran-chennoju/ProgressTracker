@@ -59,14 +59,14 @@ function AppNavigator() {
         <Stack.Screen
           name="Category"
           component={CategoryScreen}
-          options={({ route }) => ({ title: route.params.title })}
+          options={{ headerShown: false }}
         />
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
 
-        {/* Add screens */}
-        <Stack.Screen name="AddCategory" component={AddCategoryScreen} options={{ title: 'Add Category', presentation: 'card' }} />
-        <Stack.Screen name="AddEntry" component={AddEntryScreen} options={{ title: 'Add Entry', presentation: 'card' }} />
-        <Stack.Screen name="AddTask" component={AddTaskScreen} options={{ title: 'Add Task', presentation: 'card' }} />
+        {/* Add screens — all have custom headers */}
+        <Stack.Screen name="AddCategory" component={AddCategoryScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AddEntry" component={AddEntryScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AddTask" component={AddTaskScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
       <StatusBar style="auto" />
     </NavigationContainer>

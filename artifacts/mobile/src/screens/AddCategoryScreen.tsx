@@ -8,114 +8,100 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { safeFetchCategoryTitleSuggestions } from '../lib/dbSafeHelpers';
+import { invokeNavCallback } from '../lib/navigationCallbacks';
+import { useTheme } from '../lib/theme';
 
-// ─── Normalization helper ─────────────────────────────────────────────────────
 const normalizeCategoryTitle = (t: string) => t.trim().toLowerCase();
 
 export default function AddCategoryScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
-  const { date, slot } = route.params;
+  const { colors } = useTheme();
+  const { date, slot, callbackKey } = route.params;
 
   const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(false);
-  const [allCategoryTitles, setAllCategoryTitles] = useState<string[]>([]);
-  const [fetchingSuggestions, setFetchingSuggestions] = useState(true);
+  const [allTitles, setAllTitles] = useState<string[]>([]);
 
-  // ── Load existing titles for suggestions and duplicate checks ──────────────
   useEffect(() => {
-    async function fetchAllCategories() {
-      try {
-        const uniqueTitles = await safeFetchCategoryTitleSuggestions(slot);
-        setAllCategoryTitles(uniqueTitles);
-      } catch (error) {
-        console.error('Error fetching categories:', error);
-      } finally {
-        setFetchingSuggestions(false);
-      }
-    }
-    fetchAllCategories();
+    safeFetchCategoryTitleSuggestions(slot)
+      .then(setAllTitles)
+      .catch(err => console.error('Error fetching suggestions:', err));
   }, [slot]);
 
-  // ── Filtered suggestions ────────────────────────────────────────────────────
   const suggestions = useMemo(() => {
     if (!title.trim()) return [];
     const norm = normalizeCategoryTitle(title);
-    return allCategoryTitles
+    return allTitles
       .filter(t => t.toLowerCase().includes(norm) && t.toLowerCase() !== norm)
       .slice(0, 5);
-  }, [title, allCategoryTitles]);
+  }, [title, allTitles]);
 
-  // ── Main handler ────────────────────────────────────────────────────────────
   const handleAdd = async () => {
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle) return;
+    const trimmed = title.trim();
+    if (!trimmed) return;
 
     setLoading(true);
     Keyboard.dismiss();
 
     try {
-      const normalizedTitle = normalizeCategoryTitle(trimmedTitle);
+      const normalized = normalizeCategoryTitle(trimmed);
 
-      // ── Slot-wide normalized duplicate check ──────────────────────────────
-      // Fetch ALL active categories for this slot (not just this date).
-      // A canonical category should be unique per (normalized title + date + slot).
-      const { data: existingSlotCats, error: fetchErr } = await supabase
+      // Slot-wide duplicate check
+      const { data: existing, error: fetchErr } = await supabase
         .from('categories')
         .select('*')
         .eq('slot', slot)
         .eq('is_deleted', false);
-
       if (fetchErr) throw fetchErr;
 
-      const matched = existingSlotCats?.find(
-        c => normalizeCategoryTitle(c.title) === normalizedTitle,
+      const matched = existing?.find(
+        c => normalizeCategoryTitle(c.title) === normalized,
       );
 
-      if (matched) {
-        // Reuse existing category — navigate back with it so DayScreen updates
-        navigation.navigate('Day', { date, newCategory: matched });
-        return;
-      }
+      const resultCat = matched ?? await (async () => {
+        const { data, error } = await supabase
+          .from('categories')
+          .insert([{ slot, date, title: trimmed, is_deleted: false }])
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      })();
 
-      // ── Create new category ────────────────────────────────────────────────
-      const { data: newCat, error: insertErr } = await supabase
-        .from('categories')
-        .insert([{ slot, date, title: trimmedTitle, is_deleted: false }])
-        .select()
-        .single();
-
-      if (insertErr) throw insertErr;
-
-      // Pop this screen and pass the new category back to DayScreen
-      navigation.navigate('Day', { date, newCategory: newCat });
-    } catch (error: any) {
-      console.error('Error adding category:', error);
-      Alert.alert('Error', error.message || 'Could not add category');
+      // Fire callback → DayScreen updates optimistically
+      invokeNavCallback(callbackKey, resultCat);
+      navigation.goBack();
+    } catch (err: any) {
+      console.error('Error adding category:', err);
+      Alert.alert('Error', err.message || 'Could not add category');
     } finally {
       setLoading(false);
     }
   };
 
+  const s = mkStyles(colors);
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <ChevronLeft size={24} color="#000" />
+    <SafeAreaView style={s.container}>
+      <View style={s.header}>
+        <Pressable onPress={() => navigation.goBack()} style={s.backBtn}>
+          <ChevronLeft size={24} color={colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Add Category</Text>
+        <Text style={s.headerTitle}>Add Category</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.content}
+        style={s.content}
       >
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Category Name</Text>
+        <View style={s.inputContainer}>
+          <Text style={s.label}>Category Name</Text>
           <TextInput
-            style={styles.input}
+            style={s.input}
             placeholder="e.g., Coding, Reading, Workout"
+            placeholderTextColor={colors.textSecondary}
             value={title}
             onChangeText={setTitle}
             autoFocus
@@ -126,94 +112,60 @@ export default function AddCategoryScreen() {
         </View>
 
         {suggestions.length > 0 && (
-          <View style={styles.suggestionsList}>
-            <Text style={styles.suggestionHeader}>Suggestions</Text>
-            {suggestions.map((item, index) => (
-              <Pressable
-                key={index}
-                style={styles.suggestionItem}
-                onPress={() => setTitle(item)}
-              >
-                <Text style={styles.suggestionText}>{item}</Text>
+          <View style={s.suggestionsList}>
+            <Text style={s.suggestionHeader}>Suggestions</Text>
+            {suggestions.map((item, i) => (
+              <Pressable key={i} style={s.suggestionItem} onPress={() => setTitle(item)}>
+                <Text style={s.suggestionText}>{item}</Text>
               </Pressable>
             ))}
           </View>
         )}
 
         <Pressable
-          style={[styles.addBtn, (!title.trim() || loading) && styles.addBtnDisabled]}
+          style={[s.addBtn, (!title.trim() || loading) && s.addBtnDisabled]}
           onPress={handleAdd}
           disabled={!title.trim() || loading}
         >
-          {loading ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.addBtnText}>Add Category</Text>
-          )}
+          {loading
+            ? <ActivityIndicator color="#FFF" />
+            : <Text style={s.addBtnText}>Add Category</Text>}
         </Pressable>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
+const mkStyles = (colors: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   backBtn: { padding: 8 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text },
   content: { flex: 1, padding: 20 },
   inputContainer: { marginBottom: 20 },
-  label: { fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 8 },
+  label: { fontSize: 14, fontWeight: '600', color: colors.textSecondary, marginBottom: 8 },
   input: {
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#1A1A1A',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 12, padding: 16, fontSize: 16, color: colors.text,
   },
   suggestionsList: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#EEE',
-    marginBottom: 20,
-    overflow: 'hidden',
+    backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1,
+    borderColor: colors.border, marginBottom: 20, overflow: 'hidden',
   },
   suggestionHeader: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#999',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    textTransform: 'uppercase',
+    fontSize: 12, fontWeight: 'bold', color: colors.textSecondary,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, textTransform: 'uppercase',
   },
-  suggestionItem: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#F5F5F5',
-  },
-  suggestionText: { fontSize: 15, color: '#333' },
+  suggestionItem: { padding: 16, borderTopWidth: 1, borderTopColor: colors.border },
+  suggestionText: { fontSize: 15, color: colors.text },
   addBtn: {
-    backgroundColor: '#000',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 'auto',
-    marginBottom: 20,
+    backgroundColor: colors.primary, borderRadius: 12, padding: 16,
+    alignItems: 'center', justifyContent: 'center', marginTop: 'auto', marginBottom: 20,
   },
-  addBtnDisabled: { backgroundColor: '#CCC' },
+  addBtnDisabled: { backgroundColor: colors.border },
   addBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 });

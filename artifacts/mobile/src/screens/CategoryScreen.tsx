@@ -1,9 +1,13 @@
 /**
  * CategoryScreen.tsx
  *
+ * Unified header (Home | Title | ─) matching DayScreen style.
  * Shows:
- *  1. Pending Tasks section (top) — with checkbox completion & carry-forward badge
- *  2. Completed Entries / History (below)
+ *  1. Pending Tasks (top) — checkbox completion, carry-forward badge
+ *  2. History / Entries (below)
+ *
+ * Task completion correctly creates a normal item entry.
+ * Task & entry adds use callback + goBack() — no stack duplication.
  */
 
 import React, { useEffect, useState, useCallback, useMemo, memo } from 'react';
@@ -12,8 +16,8 @@ import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Trash2, Plus, Calendar, Clock, Square, ClipboardList } from 'lucide-react-native';
+import { useRoute, useNavigation } from '@react-navigation/native';
+import { Trash2, Plus, Calendar, Clock, Square, ClipboardList, Home } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import {
   safeFetchItemsByCategoryId,
@@ -26,6 +30,7 @@ import {
   softDeleteTask,
   SafeTask,
 } from '../lib/taskHelpers';
+import { registerNavCallback } from '../lib/navigationCallbacks';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useTheme } from '../lib/theme';
 import { format, parseISO } from 'date-fns';
@@ -38,36 +43,36 @@ const TaskRow = memo(({ task, colors, onComplete, onDelete }: {
   onDelete: (id: string) => void;
 }) => {
   const [completing, setCompleting] = useState(false);
-  const handleComplete = async () => {
+  const handle = async () => {
     setCompleting(true);
     await onComplete(task);
     setCompleting(false);
   };
   return (
-    <View style={[tStyles.row, { backgroundColor: colors.taskBg, borderColor: colors.taskBorder }]}>
-      <Pressable onPress={handleComplete} disabled={completing} style={tStyles.checkbox} hitSlop={8}>
+    <View style={[tS.row, { backgroundColor: colors.taskBg, borderColor: colors.taskBorder }]}>
+      <Pressable onPress={handle} disabled={completing} style={tS.checkbox} hitSlop={8}>
         {completing
           ? <ActivityIndicator size="small" color={colors.primary} />
           : <Square size={22} color={colors.primary} />}
       </Pressable>
-      <View style={tStyles.textArea}>
-        <Text style={[tStyles.content, { color: colors.text }]}>{task.content}</Text>
+      <View style={tS.textArea}>
+        <Text style={[tS.content, { color: colors.text }]}>{task.content}</Text>
         {task.carried_forward_from && (
-          <View style={[tStyles.badge, { backgroundColor: colors.primaryLight }]}>
-            <Text style={[tStyles.badgeText, { color: colors.primary }]}>
+          <View style={[tS.badge, { backgroundColor: colors.primaryLight }]}>
+            <Text style={[tS.badgeText, { color: colors.primary }]}>
               📅 from {format(parseISO(task.carried_forward_from), 'MMM d')}
             </Text>
           </View>
         )}
       </View>
-      <Pressable onPress={() => onDelete(task.id)} hitSlop={8} style={tStyles.del}>
+      <Pressable onPress={() => onDelete(task.id)} hitSlop={8} style={tS.del}>
         <Trash2 size={14} color={colors.danger} opacity={0.5} />
       </Pressable>
     </View>
   );
 });
 
-const tStyles = StyleSheet.create({
+const tS = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-start', borderRadius: 10, padding: 14, borderWidth: 1, marginBottom: 8 },
   checkbox: { marginRight: 12, paddingTop: 1 },
   textArea: { flex: 1 },
@@ -77,7 +82,7 @@ const tStyles = StyleSheet.create({
   del: { paddingLeft: 8, paddingTop: 2 },
 });
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function CategoryScreen() {
   const route = useRoute<any>();
@@ -112,22 +117,23 @@ export default function CategoryScreen() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Receive new task from AddTaskScreen
-  useFocusEffect(useCallback(() => {
-    const p = route.params as any;
-    if (p?.newTask) {
-      const t = p.newTask;
-      setTasks(prev => prev.some(x => x.id === t.id) ? prev : [t, ...prev]);
-      navigation.setParams({ newTask: undefined });
-    }
-  }, [route.params]));
+  // ── Task Actions ────────────────────────────────────────────────────────────
 
   const handleCompleteTask = useCallback(async (task: SafeTask) => {
+    // Optimistic: remove from pending immediately
     setTasks(prev => prev.filter(t => t.id !== task.id));
     try {
       const newItem = await completeTask(task);
-      setItems(prev => prev.some(i => i.id === newItem.id) ? prev : [newItem, ...prev]);
-    } catch (e) { console.error(e); setTasks(prev => [task, ...prev]); }
+      // Optimistic: add entry to history
+      if (newItem) {
+        setItems(prev => prev.some(i => i.id === newItem.id) ? prev : [newItem, ...prev]);
+      }
+    } catch (e) {
+      console.error('Task completion error:', e);
+      // Roll back
+      setTasks(prev => [task, ...prev]);
+      Alert.alert('Error', 'Could not complete task. Please try again.');
+    }
   }, []);
 
   const handleDeleteTask = useCallback((id: string) => {
@@ -140,6 +146,18 @@ export default function CategoryScreen() {
     ]);
   }, [fetchAll]);
 
+  // ── Open AddTask — callback pattern ────────────────────────────────────────
+
+  const handleOpenAddTask = useCallback(() => {
+    const callbackKey = registerNavCallback((newTask: SafeTask | null) => {
+      if (!newTask) return;
+      setTasks(prev => prev.some(t => t.id === newTask.id) ? prev : [newTask, ...prev]);
+    });
+    navigation.navigate('AddTask', { categoryId, categoryTitle: title, date: today, callbackKey });
+  }, [navigation, categoryId, title, today]);
+
+  // ── Item Actions ────────────────────────────────────────────────────────────
+
   const handleAddItem = async () => {
     const content = newContent.trim();
     if (!content || !user) return;
@@ -148,7 +166,8 @@ export default function CategoryScreen() {
     setIsAdding(true);
     try {
       const { data: newItem, error } = await supabase
-        .from('items').insert([{ category_id: categoryId, content, date: today }])
+        .from('items')
+        .insert([{ category_id: categoryId, content, date: today }])
         .select().single();
       if (error) throw error;
       setItems(prev => [newItem, ...prev]);
@@ -169,16 +188,27 @@ export default function CategoryScreen() {
 
   const s = useMemo(() => mkStyles(colors), [colors]);
 
+  // ─── Render ────────────────────────────────────────────────────────────────
+
   return (
     <SafeAreaView style={s.container} edges={['bottom']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }} keyboardVerticalOffset={100}>
-        <ScrollView contentContainerStyle={s.scroll}>
-          <View style={s.headerInfo}>
-            <Text style={s.titleText}>{title}</Text>
-            <Text style={s.subtitle}>History & pending tasks</Text>
-          </View>
+      {/* ── Unified Header (matches DayScreen) ── */}
+      <View style={s.header}>
+        <Pressable onPress={() => navigation.popToTop()} style={s.homeBtn}>
+          <Home size={22} color={colors.text} />
+        </Pressable>
+        <Text style={s.headerTitle} numberOfLines={1}>{title}</Text>
+        <View style={{ width: 40 }} />
+      </View>
 
-          {/* Add Entry */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={0}
+      >
+        <ScrollView contentContainerStyle={s.scroll}>
+
+          {/* Add Entry inline input */}
           <View style={s.inputSection}>
             <View style={s.inputWrapper}>
               <TextInput
@@ -188,21 +218,30 @@ export default function CategoryScreen() {
                 value={newContent}
                 onChangeText={text => {
                   setNewContent(text);
-                  setSuggestions(text ? allContents.filter(c =>
-                    c.toLowerCase().includes(text.toLowerCase()) && c.toLowerCase() !== text.toLowerCase()
-                  ).slice(0, 5) : []);
+                  setSuggestions(text
+                    ? allContents.filter(c =>
+                        c.toLowerCase().includes(text.toLowerCase()) &&
+                        c.toLowerCase() !== text.toLowerCase()
+                      ).slice(0, 5)
+                    : []);
                 }}
                 multiline
               />
-              <Pressable style={[s.addIconBtn, (!newContent.trim() || isAdding) && s.addIconBtnDis]}
-                onPress={handleAddItem} disabled={!newContent.trim() || isAdding}>
-                {isAdding ? <ActivityIndicator size="small" color="#FFF" /> : <Plus size={24} color="#FFF" />}
+              <Pressable
+                style={[s.addIconBtn, (!newContent.trim() || isAdding) && s.addIconBtnDis]}
+                onPress={handleAddItem}
+                disabled={!newContent.trim() || isAdding}
+              >
+                {isAdding
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Plus size={24} color="#FFF" />}
               </Pressable>
             </View>
             {suggestions.length > 0 && (
               <View style={s.suggestionBox}>
                 {suggestions.map((sg, i) => (
-                  <Pressable key={i} style={s.suggestionItem} onPress={() => { setNewContent(sg); setSuggestions([]); }}>
+                  <Pressable key={i} style={s.suggestionItem}
+                    onPress={() => { setNewContent(sg); setSuggestions([]); }}>
                     <Text style={s.suggestionText}>{sg}</Text>
                   </Pressable>
                 ))}
@@ -220,8 +259,7 @@ export default function CategoryScreen() {
                   <ClipboardList size={16} color={colors.primary} />
                   <Text style={[s.sectionTitle, { color: colors.primary }]}> Pending Tasks</Text>
                 </View>
-                <Pressable style={[s.addTaskBtn, { borderColor: colors.primary }]}
-                  onPress={() => navigation.navigate('AddTask', { categoryId, categoryTitle: title, date: today })}>
+                <Pressable style={[s.addTaskBtn, { borderColor: colors.primary }]} onPress={handleOpenAddTask}>
                   <Plus size={13} color={colors.primary} />
                   <Text style={[s.addTaskBtnText, { color: colors.primary }]}>Add Task</Text>
                 </Pressable>
@@ -291,10 +329,15 @@ export default function CategoryScreen() {
 
 const mkStyles = (colors: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  // ── Unified header matching DayScreen ──
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  homeBtn: { padding: 8, marginRight: 4 },
+  headerTitle: { flex: 1, fontSize: 18, fontWeight: 'bold', color: colors.text, textAlign: 'center', marginRight: 44 },
   scroll: { padding: 20 },
-  headerInfo: { marginBottom: 20 },
-  titleText: { fontSize: 28, fontWeight: 'bold', color: colors.text },
-  subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
   inputSection: { marginBottom: 24, zIndex: 10 },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'flex-end', backgroundColor: colors.surface,
