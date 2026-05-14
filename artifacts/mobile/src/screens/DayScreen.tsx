@@ -3,20 +3,21 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2, Home, ClipboardList } from 'lucide-react-native';
+import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
+import { ChevronLeft, ChevronRight, Plus, FolderPlus, Trash2, Home, ClipboardList, Square } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { safeDeleteCategory } from '../lib/dbSafeHelpers';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useTheme } from '../lib/theme';
 import { registerNavCallback } from '../lib/navigationCallbacks';
-import { format, addDays, parseISO } from 'date-fns';
+import { format, addDays, parseISO, isSameDay } from 'date-fns';
+import { carryForwardIncompleteTasks, completeTask } from '../lib/taskHelpers';
 
 // ─── Memoized CategoryCard ────────────────────────────────────────────────────
 
 const CategoryCard = memo(({
   cat, activeSlot, userSlot, colors,
-  onAddEntry, onAddTask, onDeleteCategory, onNavigate,
+  onAddEntry, onAddTask, onDeleteCategory, onNavigate, onCompleteTask,
 }: any) => (
   <Pressable style={[cardStyles.card, { backgroundColor: colors.surface }]} onPress={() => onNavigate(cat.id, cat.title)}>
     {/* Header row */}
@@ -27,16 +28,37 @@ const CategoryCard = memo(({
       </Pressable>
     </View>
 
-    {/* Items preview */}
+    {/* Items & Tasks preview */}
     <View style={cardStyles.itemsList}>
-      {(cat.items || []).length === 0 ? (
-        <Text style={[cardStyles.noItemsText, { color: colors.textSecondary }]}>No entries yet</Text>
-      ) : (
-        cat.items.map((item: any) => (
-          <Text key={item.id} style={[cardStyles.itemPreview, { color: colors.textSecondary }]} numberOfLines={2}>
-            • {item.content}
+      {/* Tasks first (Pending) */}
+      {(cat.tasks || []).map((task: any) => (
+        <View key={task.id} style={cardStyles.taskPreviewRow}>
+          {activeSlot === userSlot ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation(); onCompleteTask(task); }}
+              hitSlop={8}
+              style={cardStyles.checkbox}
+            >
+              <Square size={18} color={colors.primary} />
+            </Pressable>
+          ) : (
+            <Square size={14} color={colors.border} style={{ marginTop: 4 }} />
+          )}
+          <Text style={[cardStyles.itemPreview, { color: colors.textSecondary, fontStyle: 'italic', flex: 1 }]} numberOfLines={2}>
+            {task.content}
           </Text>
-        ))
+        </View>
+      ))}
+
+      {/* Normal Entries */}
+      {(cat.items || []).map((item: any) => (
+        <Text key={item.id} style={[cardStyles.itemPreview, { color: colors.textSecondary }]} numberOfLines={2}>
+          • {item.content}
+        </Text>
+      ))}
+
+      {(cat.items || []).length === 0 && (cat.tasks || []).length === 0 && (
+        <Text style={[cardStyles.noItemsText, { color: colors.textSecondary }]}>No entries yet</Text>
       )}
     </View>
 
@@ -76,6 +98,8 @@ const cardStyles = StyleSheet.create({
   title: { fontSize: 16, fontWeight: 'bold', flex: 1 },
   itemsList: { marginTop: 5 },
   noItemsText: { fontStyle: 'italic', fontSize: 13 },
+  taskPreviewRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
+  checkbox: { marginTop: 2 },
   itemPreview: { fontSize: 14, marginBottom: 6, lineHeight: 20 },
   actionsRow: {
     flexDirection: 'row', alignItems: 'center',
@@ -118,8 +142,30 @@ export default function DayScreen() {
         .order('created_at', { ascending: true });
       if (itemError) throw itemError;
 
+      // Also fetch tasks for this day
+      const { data: taskData, error: taskError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('task_date', selectedDate)
+        .eq('completed', false)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: true });
+      if (taskError) throw taskError;
+
+      // Carry forward if it's today and we didn't find many tasks? 
+      // Actually, taskHelpers.ts handles the logic to only do it once.
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      if (selectedDate === todayStr) {
+        await carryForwardIncompleteTasks(todayStr).catch(console.error);
+        // If we carried forward, we might want to re-fetch tasks?
+        // For simplicity, we just proceed. The next fetch or focus will pick them up.
+      }
+
       const catIdsWithItems = Array.from(new Set(itemData?.map(i => i.category_id) || []));
-      const orFilter = `date.eq.${selectedDate}${catIdsWithItems.length > 0 ? `,id.in.(${catIdsWithItems.join(',')})` : ''}`;
+      const catIdsWithTasks = Array.from(new Set(taskData?.map(t => t.category_id) || []));
+      const allActiveCatIds = Array.from(new Set([...catIdsWithItems, ...catIdsWithTasks]));
+
+      const orFilter = `date.eq.${selectedDate}${allActiveCatIds.length > 0 ? `,id.in.(${allActiveCatIds.join(',')})` : ''}`;
 
       const { data: catData, error: catError } = await supabase
         .from('categories')
@@ -134,7 +180,17 @@ export default function DayScreen() {
         itemsByCat.get(item.category_id)!.push(item);
       });
 
-      const processed = catData?.map(cat => ({ ...cat, items: itemsByCat.get(cat.id) || [] })) || [];
+      const tasksByCat = new Map<string, any[]>();
+      taskData?.forEach(task => {
+        if (!tasksByCat.has(task.category_id)) tasksByCat.set(task.category_id, []);
+        tasksByCat.get(task.category_id)!.push(task);
+      });
+
+      const processed = catData?.map(cat => ({
+        ...cat,
+        items: itemsByCat.get(cat.id) || [],
+        tasks: tasksByCat.get(cat.id) || [],
+      })) || [];
 
       setData({
         A: processed.filter(c => c.slot === 'A'),
@@ -148,6 +204,7 @@ export default function DayScreen() {
   }, []);
 
   useEffect(() => { fetchDayData(date); }, [date, fetchDayData]);
+  useFocusEffect(useCallback(() => { fetchDayData(date); }, [date, fetchDayData]));
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -195,15 +252,40 @@ export default function DayScreen() {
     navigation.navigate('AddEntry', { categoryId, categoryTitle, date, callbackKey });
   }, [navigation, date]);
 
-  // AddTask — callback-based: task is added, no DayScreen state change needed
-  // (tasks live in CategoryScreen; we just show a quiet success)
+  // AddTask — callback-based
   const handleAddTask = useCallback((categoryId: string, categoryTitle: string) => {
     const callbackKey = registerNavCallback((_newTask: any) => {
-      // Tasks don't appear in DayScreen — CategoryScreen will show them.
-      // Nothing to update here. The callback is purely for future extensibility.
+      fetchDayData(date);
     });
     navigation.navigate('AddTask', { categoryId, categoryTitle, date, callbackKey });
-  }, [navigation, date]);
+  }, [navigation, date, fetchDayData]);
+
+  const handleCompleteTask = useCallback(async (task: any) => {
+    // Optimistic update
+    setData((prev: any) => {
+      const slot = activeSlot;
+      return {
+        ...prev,
+        [slot]: prev[slot].map((cat: any) => {
+          if (cat.id === task.category_id) {
+            return {
+              ...cat,
+              tasks: cat.tasks.filter((t: any) => t.id !== task.id),
+              items: [{ ...task, id: `temp-${Date.now()}` }, ...cat.items],
+            };
+          }
+          return cat;
+        }),
+      };
+    });
+
+    try {
+      await completeTask(task);
+    } catch (err) {
+      console.error('Error completing task:', err);
+      fetchDayData(date);
+    }
+  }, [activeSlot, date, fetchDayData]);
 
   // AddCategory — callback-based
   const handleAddCategory = useCallback(() => {
@@ -278,6 +360,7 @@ export default function DayScreen() {
                 onAddTask={handleAddTask}
                 onDeleteCategory={handleDeleteCategory}
                 onNavigate={navigateToCategory}
+                onCompleteTask={handleCompleteTask}
               />
             ))}
 
