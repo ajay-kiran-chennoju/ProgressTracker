@@ -200,13 +200,11 @@ export async function carryForwardIncompleteTasks(today: string): Promise<void> 
     if (fetchErr) throw fetchErr;
     if (!oldTasks || oldTasks.length === 0) return;
 
-    // 2. Fetch today's existing pending tasks to prevent duplicates
+    // 2. Fetch today's existing tasks (including deleted/completed) to prevent re-carrying them forward
     const { data: todayTasks, error: todayErr } = await supabase
       .from('tasks')
       .select('content, category_id')
-      .eq('task_date', today)
-      .eq('completed', false)
-      .eq('is_deleted', false);
+      .eq('task_date', today);
 
     if (todayErr) throw todayErr;
 
