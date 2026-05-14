@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS tasks (
   id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  category_id         UUID        NOT NULL REFERENCES categories(id),
+  category_id         TEXT        NOT NULL REFERENCES categories(id),
   slot                TEXT        NOT NULL,
   content             TEXT        NOT NULL,
   task_date           DATE        NOT NULL,
