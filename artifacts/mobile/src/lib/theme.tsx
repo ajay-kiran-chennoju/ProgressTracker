@@ -27,7 +27,9 @@ export type ThemeId =
   | 'orange'
   | 'pink'
   | 'slate'
-  | 'teal';
+  | 'teal'
+  | 'lavender'
+  | 'chocolate';
 
 export interface ThemeColors {
   primary: string;       // main action color
@@ -183,6 +185,44 @@ export const THEMES: ThemeDefinition[] = [
       taskBorder: '#99F6E4',
       danger: '#EF4444',
       success: '#0D9488',
+    },
+  },
+  {
+    id: 'lavender',
+    label: 'Lavender Dream',
+    emoji: '🪻',
+    colors: {
+      primary: '#7B5EA7',
+      primaryLight: '#F3EEFF',
+      accent: '#9D77CC',
+      background: '#FAF8FF',
+      surface: '#FFFFFF',
+      text: '#2D1B4E',
+      textSecondary: '#7E6A9A',
+      border: '#E4D9F5',
+      taskBg: '#F3EEFF',
+      taskBorder: '#C9B5E8',
+      danger: '#EF4444',
+      success: '#10B981',
+    },
+  },
+  {
+    id: 'chocolate',
+    label: 'Dark Chocolate',
+    emoji: '🍫',
+    colors: {
+      primary: '#6B3A2A',
+      primaryLight: '#FDF0EB',
+      accent: '#9C5A3C',
+      background: '#FBF7F5',
+      surface: '#FFFFFF',
+      text: '#2C1A12',
+      textSecondary: '#8D6655',
+      border: '#EDD9CF',
+      taskBg: '#FDF0EB',
+      taskBorder: '#D4A898',
+      danger: '#DC2626',
+      success: '#16A34A',
     },
   },
 ];
