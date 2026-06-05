@@ -11,7 +11,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import { useTheme } from '../lib/theme';
 import { registerNavCallback } from '../lib/navigationCallbacks';
 import { format, addDays, parseISO, isSameDay } from 'date-fns';
-import { carryForwardIncompleteTasks, completeTask } from '../lib/taskHelpers';
+import { completeTask } from '../lib/taskHelpers';
 
 // ─── Memoized CategoryCard ────────────────────────────────────────────────────
 
@@ -48,11 +48,7 @@ const CategoryCard = memo(({
             <Text style={[cardStyles.itemPreview, { color: colors.textSecondary, fontStyle: 'italic' }]} numberOfLines={2}>
               {task.content}
             </Text>
-            {task.carried_forward_from && (
-              <Text style={[cardStyles.fromBadge, { color: colors.primary }]}>
-                from {format(parseISO(task.carried_forward_from), 'MMM d')}
-              </Text>
-            )}
+
           </View>
         </View>
       ))}
@@ -107,7 +103,7 @@ const cardStyles = StyleSheet.create({
   noItemsText: { fontStyle: 'italic', fontSize: 13 },
   taskPreviewRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   checkbox: { marginTop: 2 },
-  fromBadge: { fontSize: 10, fontWeight: '700', marginTop: -4, marginBottom: 4 },
+
   itemPreview: { fontSize: 14, marginBottom: 6, lineHeight: 20 },
   actionsRow: {
     flexDirection: 'row', alignItems: 'center',
@@ -137,11 +133,7 @@ export default function DayScreen() {
   const fetchDayData = useCallback(async (selectedDate: string) => {
     setLoading(true);
     try {
-      // Carry forward if it's today and the user is viewing their own slot
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
-      if (selectedDate === todayStr && activeSlot === user?.slot) {
-        await carryForwardIncompleteTasks(todayStr).catch(console.error);
-      }
+
 
       const { data: partData } = await supabase.from('participants').select('slot, name');
       const partMap: any = { A: null, B: null };
@@ -157,13 +149,14 @@ export default function DayScreen() {
       if (itemError) throw itemError;
 
       // Also fetch tasks for this day
+      const nextDate = format(addDays(parseISO(selectedDate), 1), 'yyyy-MM-dd');
       const { data: taskData, error: taskError } = await supabase
-        .from('tasks')
+        .from('tasks_v2')
         .select('*')
-        .eq('task_date', selectedDate)
-        .eq('completed', false)
+        .lte('added_date', selectedDate)
         .eq('is_deleted', false)
-        .order('created_at', { ascending: true });
+        .or(`completed_at.is.null,and(completed_at.gte.${selectedDate}T00:00:00.000Z,completed_at.lt.${nextDate}T00:00:00.000Z)`)
+        .order('id', { ascending: true });
       if (taskError) throw taskError;
 
       const catIdsWithItems = Array.from(new Set(itemData?.map(i => i.category_id) || []));

@@ -2,19 +2,10 @@
  * taskHelpers.ts
  *
  * Safe database helpers for the tasks feature.
- *
- * Carry-forward rules enforced here:
- *  - Uniqueness: (content normalized + category_id + task_date) prevents duplicates.
- *  - Carry-forward: incomplete tasks from previous days are cloned once for today.
- *  - Completion: marks task done and inserts a normal item entry.
- *  - Soft-delete: is_deleted pattern mirrors the items/categories pattern.
  */
 
 import { supabase } from './supabase';
 import { format } from 'date-fns';
-
-// ─── Internal Lock ────────────────────────────────────────────────────────────
-let isCarryingForward = false;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,10 +14,8 @@ export interface SafeTask {
   category_id: string;
   slot: string;
   content: string;
-  task_date: string;
-  completed: boolean;
+  added_date: string;
   completed_at: string | null;
-  carried_forward_from: string | null;
   is_deleted: boolean;
   created_at: string;
 }
@@ -45,24 +34,47 @@ export async function fetchPendingTasksForCategory(
   taskDate: string,
 ): Promise<SafeTask[]> {
   const { data, error } = await supabase
-    .from('tasks')
+    .from('tasks_v2')
     .select('*')
     .eq('category_id', categoryId)
-    .eq('task_date', taskDate)
-    .eq('completed', false)
+    .lte('added_date', taskDate)
+    .is('completed_at', null)
     .eq('is_deleted', false)
-    .order('created_at', { ascending: true });
+    .order('id', { ascending: true });
 
   if (error) throw error;
   return data ?? [];
 }
 
 /**
+ * Fetch all pending tasks across multiple category IDs.
+ * Used by CategoryScreen to aggregate tasks across all same-title/slot instances.
+ */
+export async function fetchPendingTasksForCategories(
+  categoryIds: string[],
+  taskDate: string,
+): Promise<SafeTask[]> {
+  if (categoryIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('tasks_v2')
+    .select('*')
+    .in('category_id', categoryIds)
+    .lte('added_date', taskDate)
+    .is('completed_at', null)
+    .eq('is_deleted', false)
+    .order('id', { ascending: true });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+
+/**
  * Fetch unique task content suggestions for a category (from all dates, not deleted).
  */
 export async function fetchTaskSuggestions(categoryId: string): Promise<string[]> {
   const { data, error } = await supabase
-    .from('tasks')
+    .from('tasks_v2')
     .select('content')
     .eq('category_id', categoryId)
     .eq('is_deleted', false);
@@ -76,7 +88,7 @@ export async function fetchTaskSuggestions(categoryId: string): Promise<string[]
 
 /**
  * Safely create a new task, preventing duplicates.
- * Uniqueness: (normalized content + category_id + task_date + completed=false).
+ * Uniqueness: (normalized content + category_id + active incomplete task).
  *
  * Returns the created or existing task.
  */
@@ -85,18 +97,16 @@ export async function safeCreateTask(params: {
   slot: string;
   content: string;
   taskDate: string;
-  carriedForwardFrom?: string;
 }): Promise<SafeTask | null> {
-  const { categoryId, slot, content, taskDate, carriedForwardFrom } = params;
+  const { categoryId, slot, content, taskDate } = params;
   const normalised = normalizeContent(content);
 
-  // Duplicate guard
+  // Duplicate guard: check for active incomplete task with same content/category
   const { data: existing, error: checkErr } = await supabase
-    .from('tasks')
+    .from('tasks_v2')
     .select('*')
     .eq('category_id', categoryId)
-    .eq('task_date', taskDate)
-    .eq('completed', false)
+    .is('completed_at', null)
     .eq('is_deleted', false);
 
   if (checkErr) throw checkErr;
@@ -108,15 +118,14 @@ export async function safeCreateTask(params: {
 
   // Insert
   const { data: newTask, error } = await supabase
-    .from('tasks')
+    .from('tasks_v2')
     .insert([
       {
         category_id: categoryId,
         slot,
         content: content.trim(),
-        task_date: taskDate,
-        completed: false,
-        carried_forward_from: carriedForwardFrom ?? null,
+        added_date: taskDate,
+        completed_at: null,
         is_deleted: false,
       },
     ])
@@ -138,8 +147,8 @@ export async function completeTask(task: SafeTask): Promise<any> {
 
   // 1. Mark the task as completed
   const { error: taskErr } = await supabase
-    .from('tasks')
-    .update({ completed: true, completed_at: new Date().toISOString() })
+    .from('tasks_v2')
+    .update({ completed_at: new Date().toISOString() })
     .eq('id', task.id);
 
   if (taskErr) throw taskErr;
@@ -175,86 +184,6 @@ export async function completeTask(task: SafeTask): Promise<any> {
   return newItem;
 }
 
-// ─── CARRY-FORWARD ────────────────────────────────────────────────────────────
-
-/**
- * Carry-forward logic:
- * Finds all incomplete tasks from BEFORE today and creates clones for today
- * if they don't already exist (uniqueness by content + category_id + today).
- *
- * Called once on app load / day screen focus.
- */
-export async function carryForwardIncompleteTasks(today: string): Promise<void> {
-  if (isCarryingForward) return;
-  isCarryingForward = true;
-  try {
-    // 1. Find all incomplete tasks from before today
-    const { data: oldTasks, error: fetchErr } = await supabase
-      .from('tasks')
-      .select('*')
-      .lt('task_date', today)
-      .eq('completed', false)
-      .eq('is_deleted', false)
-      .order('task_date', { ascending: false }); // Most recent first
-
-    if (fetchErr) throw fetchErr;
-    if (!oldTasks || oldTasks.length === 0) return;
-
-    // 2. Fetch today's existing tasks (including deleted/completed) to prevent re-carrying them forward
-    const { data: todayTasks, error: todayErr } = await supabase
-      .from('tasks')
-      .select('content, category_id')
-      .eq('task_date', today);
-
-    if (todayErr) throw todayErr;
-
-    // 3. Fetch today's existing items (safety check: if it's already an item today, don't carry the task)
-    const { data: todayItems } = await supabase
-      .from('items')
-      .select('content, category_id')
-      .eq('date', today)
-      .eq('is_deleted', false);
-
-    const todaySet = new Set(
-      (todayTasks ?? []).map(
-        (t) => `${t.category_id}:::${normalizeContent(t.content)}`,
-      ),
-    );
-
-    (todayItems ?? []).forEach((i) => {
-      todaySet.add(`${i.category_id}:::${normalizeContent(i.content)}`);
-    });
-
-    // 4. Filter unique old tasks to carry forward
-    const uniqueToCarry = new Map<string, any>();
-    oldTasks.forEach((t) => {
-      const key = `${t.category_id}:::${normalizeContent(t.content)}`;
-      if (!todaySet.has(key) && !uniqueToCarry.has(key)) {
-        uniqueToCarry.set(key, t);
-      }
-    });
-
-    const toInsert = Array.from(uniqueToCarry.values()).map((t) => ({
-      category_id: t.category_id,
-      slot: t.slot,
-      content: t.content,
-      task_date: today,
-      completed: false,
-      carried_forward_from: t.carried_forward_from ?? t.task_date,
-      is_deleted: false,
-    }));
-
-    if (toInsert.length === 0) return;
-
-    const { error: insertErr } = await supabase.from('tasks').insert(toInsert);
-    if (insertErr) throw insertErr;
-
-    console.log(`[CARRY-FORWARD] Carried ${toInsert.length} tasks to ${today}`);
-  } finally {
-    isCarryingForward = false;
-  }
-}
-
 // ─── SOFT DELETE ──────────────────────────────────────────────────────────────
 
 /**
@@ -262,7 +191,7 @@ export async function carryForwardIncompleteTasks(today: string): Promise<void> 
  */
 export async function softDeleteTask(taskId: string): Promise<void> {
   const { error } = await supabase
-    .from('tasks')
+    .from('tasks_v2')
     .update({ is_deleted: true })
     .eq('id', taskId);
 

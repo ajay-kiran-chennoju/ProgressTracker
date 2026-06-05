@@ -113,7 +113,7 @@ export default function AddTaskScreen() {
 
         <View style={s.hint}>
           <Text style={s.hintText}>
-            💡 Incomplete tasks carry forward automatically to the next day.
+            💡 Incomplete tasks remain pending until you complete them.
           </Text>
         </View>
 

@@ -20,12 +20,12 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import { Trash2, Plus, Calendar, Clock, Square, ClipboardList, Home } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import {
-  safeFetchItemsByCategoryId,
+  safeFetchItemsByCategoryIds,
   safeFetchItemContentSuggestions,
   safeDeleteItem,
 } from '../lib/dbSafeHelpers';
 import {
-  fetchPendingTasksForCategory,
+  fetchPendingTasksForCategories,
   completeTask,
   softDeleteTask,
   SafeTask,
@@ -57,13 +57,7 @@ const TaskRow = memo(({ task, colors, onComplete, onDelete }: {
       </Pressable>
       <View style={tS.textArea}>
         <Text style={[tS.content, { color: colors.text }]}>{task.content}</Text>
-        {task.carried_forward_from && (
-          <View style={[tS.badge, { backgroundColor: colors.primaryLight }]}>
-            <Text style={[tS.badgeText, { color: colors.primary }]}>
-              📅 from {format(parseISO(task.carried_forward_from), 'MMM d')}
-            </Text>
-          </View>
-        )}
+
       </View>
       <Pressable onPress={() => onDelete(task.id)} hitSlop={8} style={tS.del}>
         <Trash2 size={14} color={colors.danger} opacity={0.5} />
@@ -103,10 +97,39 @@ export default function CategoryScreen() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      // Resolve ALL category rows with the same title+slot so items/tasks
+      // remain consistent regardless of which day's card opened this screen.
+      let siblingIds: string[] = [categoryId];
+      try {
+        const { data: thisCat } = await supabase
+          .from('categories')
+          .select('slot, title')
+          .eq('id', categoryId)
+          .single();
+
+        if (thisCat) {
+          const normTitle = thisCat.title.trim().toLowerCase();
+          const { data: siblings } = await supabase
+            .from('categories')
+            .select('id, title')
+            .eq('slot', thisCat.slot)
+            .eq('is_deleted', false);
+
+          if (siblings) {
+            const matched = siblings
+              .filter(c => c.title.trim().toLowerCase() === normTitle)
+              .map(c => c.id);
+            if (matched.length > 0) siblingIds = matched;
+          }
+        }
+      } catch (sibErr) {
+        console.warn('Could not resolve sibling categories:', sibErr);
+      }
+
       const [itemData, uniqueC, pendingTasks] = await Promise.all([
-        safeFetchItemsByCategoryId(categoryId),
+        safeFetchItemsByCategoryIds(siblingIds),
         safeFetchItemContentSuggestions(categoryId),
-        fetchPendingTasksForCategory(categoryId, today),
+        fetchPendingTasksForCategories(siblingIds, today),
       ]);
       setItems(itemData);
       setAllContents(uniqueC);

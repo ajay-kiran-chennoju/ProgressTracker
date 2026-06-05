@@ -199,6 +199,28 @@ export async function safeFetchItemsByCategoryId(categoryId: string): Promise<Sa
 }
 
 /**
+ * Fetch all active (non-deleted) items across multiple category IDs.
+ * Used by CategoryScreen to aggregate items across all same-title/slot instances.
+ */
+export async function safeFetchItemsByCategoryIds(categoryIds: string[]): Promise<SafeItem[]> {
+  if (categoryIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('items')
+    .select(`
+      *,
+      category:categories!inner(id, title, date, slot, is_deleted)
+    `)
+    .in('category_id', categoryIds)
+    .eq('is_deleted', false)
+    .eq('category.is_deleted', false)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+
+/**
  * Fetch unique item content suggestions for a category id (excluding deleted).
  */
 export async function safeFetchItemContentSuggestions(categoryId: string): Promise<string[]> {

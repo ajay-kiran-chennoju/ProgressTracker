@@ -47,11 +47,12 @@ export default function AddCategoryScreen() {
     try {
       const normalized = normalizeCategoryTitle(trimmed);
 
-      // Slot-wide duplicate check
+      // Day-specific duplicate check
       const { data: existing, error: fetchErr } = await supabase
         .from('categories')
         .select('*')
         .eq('slot', slot)
+        .eq('date', date)
         .eq('is_deleted', false);
       if (fetchErr) throw fetchErr;
 

@@ -16,8 +16,7 @@ import { RootStackParamList } from './src/lib/types';
 import { useCurrentUser } from './src/hooks/useCurrentUser';
 import { setupNotifications, scheduleDailyReminder } from './src/lib/notifications';
 import { ThemeProvider, useTheme } from './src/lib/theme';
-import { carryForwardIncompleteTasks } from './src/lib/taskHelpers';
-import { format } from 'date-fns';
+
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -31,13 +30,7 @@ function AppNavigator() {
     });
   }, []);
 
-  // ── Carry-forward incomplete tasks on every app launch ─────────────────────
-  React.useEffect(() => {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    carryForwardIncompleteTasks(today).catch(err =>
-      console.warn('[CARRY-FORWARD] error:', err),
-    );
-  }, []);
+
 
   if (!user) {
     return <OnboardingScreen />;
